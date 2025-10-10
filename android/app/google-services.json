@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "864721802461",
+    "project_id": "ubwinza",
+    "storage_bucket": "ubwinza.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:864721802461:android:ce0340c67f13f38df03734",
+        "android_client_info": {
+          "package_name": "com.ubwinza.ubwinza_users"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAubpgOqqpj0nt7aqbic464StBNPKxj_YI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:864721802461:android:c3443cdcd0f7d354f03734",
+        "android_client_info": {
+          "package_name": "com.ubwinza.ubwinzasellersproject"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAubpgOqqpj0nt7aqbic464StBNPKxj_YI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
