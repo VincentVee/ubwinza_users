@@ -1,10 +1,13 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ubwinza_users/features/delivery/state/delivery_provider.dart';
 import 'package:ubwinza_users/features/home/home_screen.dart';
 import 'package:ubwinza_users/views/splashScreen/splash_screen.dart';
 
+import 'features/food/state/cart_provider.dart';
 import 'global/global_vars.dart';
 
 
@@ -24,7 +27,14 @@ Future<void> main() async {
     }
   });
 
-  runApp(const MyApp());
+  runApp(MultiProvider(
+    providers: [
+      ChangeNotifierProvider(create: (_) => CartProvider()),
+      ChangeNotifierProvider(create: (_) => DeliveryProvider()), // Add this!
+
+    ],
+    child: const MyApp(),
+  ),);
 }
 
 class MyApp extends StatelessWidget {

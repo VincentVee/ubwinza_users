@@ -10,6 +10,18 @@ class RequestService {
     return docRef.id;
   }
 
+  final _requests = FirebaseFirestore.instance.collection('requests');
+
+  Future<void> cancelRideRequest(String requestId) async {
+    await _requests.doc(requestId).update({
+      'status': 'cancelled',
+      'cancelledAt': DateTime.now(),
+    });
+  }
+
+  // your other methods (calculateEstimatedFare, createRideRequest, etc.)
+
+
   // Get specific request stream
   Stream<RideRequest> getRequestStream(String requestId) {
     return _firestore

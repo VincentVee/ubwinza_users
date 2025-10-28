@@ -22,26 +22,17 @@ class _MySplashScreenState extends State<MySplashScreen> {
       final String? name = sharedPreferences?.getString("name");
       final String? email = sharedPreferences?.getString("email");
 
-      print('🔍 Splash Screen Check:');
-      print('   UID from SharedPreferences: $uid');
-      print('   Name from SharedPreferences: $name');
-      print('   Email from SharedPreferences: $email');
-      print('   Firebase User: ${FirebaseAuth.instance.currentUser?.uid}');
-
       if (uid != null && name != null && email != null) {
         // User data exists in SharedPreferences - navigate to home
-        print('✅ Valid user data found, going to home screen');
         Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (c) => UserHomeScreen())
         );
       } else if (FirebaseAuth.instance.currentUser != null) {
         // Firebase has user but SharedPreferences doesn't - reload user data
-        print('🔄 Firebase user found but no SharedPreferences data, reloading...');
         await _reloadUserData();
       } else {
         // No user data anywhere - go to auth screen
-        print('❌ No user data found, going to auth screen');
         Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (c) => AuthScreen())
@@ -61,13 +52,11 @@ class _MySplashScreenState extends State<MySplashScreen> {
         );
 
         if (success && mounted) {
-          print('✅ User data reloaded successfully');
           Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (c) => UserHomeScreen())
           );
         } else {
-          print('❌ Failed to reload user data');
           Navigator.pushReplacement(
               context,
               MaterialPageRoute(builder: (c) => AuthScreen())
@@ -75,7 +64,6 @@ class _MySplashScreenState extends State<MySplashScreen> {
         }
       }
     } catch (e) {
-      print('❌ Error reloading user data: $e');
       Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (c) => AuthScreen())

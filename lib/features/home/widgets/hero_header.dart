@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:ubwinza_users/features/food/ui/food_home_screen.dart';
 import 'package:ubwinza_users/global/global_instances.dart';
 import 'package:ubwinza_users/global/global_vars.dart';
 import '../../packages/presentation/package_create_screen.dart';
@@ -112,7 +113,8 @@ class HeroHeader extends StatelessWidget {
                 GestureDetector(
                   onTap: () {
                     // TODO: Navigate to Food page
-                    // Navigator.push(context, MaterialPageRoute(builder: (_) => FoodScreen()));
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => FoodHomeScreen()));
+
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),

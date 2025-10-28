@@ -324,7 +324,7 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_titleForStatus(_request?.status)),
-        backgroundColor: Colors.blue,
+        backgroundColor: const Color(0xFF1A2B7B),
       ),
       body: Stack(
         children: [
@@ -384,92 +384,237 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
               ),
             ),
 
-              // 🔴 Cancel Button (only when searching)
-              if (canCancel)
-                Positioned(
-                  bottom: MediaQuery.of(context).padding.bottom + 30,
-                  left: 20,
-                  right: 20,
-                  child: SafeArea(
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.redAccent,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      icon: const Icon(Icons.cancel_outlined, size: 22),
-                      label: const Text(
-                        'Cancel Request',
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      onPressed: () async {
-                        final confirm = await showDialog<bool>(
-                          context: context,
-                          builder: (_) => AlertDialog(
-                            title: const Text('Cancel Delivery Request'),
-                            content: const Text(
-                              'Are you sure you want to cancel this request?',
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(context, false),
-                                child: const Text('No'),
-                              ),
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.redAccent,
-                                ),
-                                onPressed: () => Navigator.pop(context, true),
-                                child: const Text('Yes, Cancel'),
-                              ),
-                            ],
-                          ),
-                        );
+          if (_selectedDriver != null)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 16,
+              child: _DriverInfoCard(
+                driver: _selectedDriver!,
+                from: widget.pickupLatLng,
+                vehicleType: widget.vehicleType,
+                onClose: () => setState(() => _selectedDriver = null),
+              ),
+            ),
 
-                        if (confirm == true) {
-                          try {
-                            await FirebaseFirestore.instance
-                                .collection('requests')
-                                .doc(widget.requestId)
-                                .update({
-                              'status': 'cancelled',
-                              'cancelledAt': DateTime.now(),
-                            });
-
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content:
-                                      Text('Request cancelled successfully.'),
-                                  backgroundColor: Colors.redAccent,
-                                ),
-                              );
-                              Navigator.of(context).pop();
-                            }
-                          } catch (e) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Failed to cancel: $e'),
-                                  backgroundColor: Colors.redAccent,
-                                ),
-                              );
-                            }
-                          }
-                        }
-                      },
-                    ),
+          if (_directionsWarning != null)
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 16,
+              child: Material(
+                color: Colors.red.withOpacity(.92),
+                borderRadius: BorderRadius.circular(10),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    'Directions error: ${_directionsWarning!}\nCheck API key & Directions API settings.',
+                    style: const TextStyle(color: Colors.white),
                   ),
                 ),
-            ],
+              ),
+            ),
+
+            // 🔴 Cancel button — only show when still finding drivers
+if (_request?.status == 'pending' || _request?.status == 'searching')
+  Positioned(
+    bottom: MediaQuery.of(context).padding.bottom + 24,
+    left: 20,
+    right: 20,
+    child: SafeArea(
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.redAccent,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        icon: const Icon(Icons.cancel_outlined, size: 22),
+        label: const Text(
+          'Cancel Request',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        onPressed: () async {
+          final confirm = await showDialog<bool>(
+            context: context,
+            builder: (_) => AlertDialog(
+              title: const Text('Cancel Delivery Request'),
+              content: const Text(
+                'Are you sure you want to cancel this request?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('No'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                  ),
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Yes, Cancel'),
+                ),
+              ],
+            ),
           );
+
+          if (confirm == true) {
+            try {
+              await RequestService().cancelRideRequest(widget.requestId);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Request cancelled successfully.'),
+                    backgroundColor: Colors.redAccent,
+                  ),
+                );
+                Navigator.of(context).pop();
+              }
+            } catch (e) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Failed to cancel request: $e'),
+                    backgroundColor: Colors.redAccent,
+                  ),
+                );
+              }
+            }
+          }
         },
+      ),
+    ),
+  ),
+
+        ],
+      ),
+    );
+  }
+
+  String _titleForStatus(String? status) {
+    switch (status) {
+      case 'pending':
+        return 'Finding Drivers';
+      case 'accepted':
+        return 'Driver Found';
+      case 'in_progress':
+        return 'On the Way';
+      case 'completed':
+        return 'Trip Completed';
+      default:
+        return 'Request';
+    }
+  }
+}
+
+class _DriverInfoCard extends StatelessWidget {
+  final Driver driver;
+  final LatLng from; // pickup
+  final String vehicleType;
+  final VoidCallback onClose;
+
+  const _DriverInfoCard({
+    required this.driver,
+    required this.from,
+    required this.vehicleType,
+    required this.onClose,
+  });
+
+  double _km(LatLng a, LatLng b) {
+    const R = 6371.0;
+    final dLat = (b.latitude - a.latitude) * (math.pi / 180.0);
+    final dLng = (b.longitude - a.longitude) * (math.pi / 180.0);
+    final la1 = a.latitude * (math.pi / 180.0);
+    final la2 = b.latitude * (math.pi / 180.0);
+    final h = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(la1) * math.cos(la2) * math.sin(dLng / 2) * math.sin(dLng / 2);
+    return R * 2 * math.atan2(math.sqrt(h), math.sqrt(1 - h));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dist = _km(from, LatLng(driver.latitude, driver.longitude));
+    return SafeArea(
+      child: Card(
+        elevation: 10,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(14.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: Colors.blue,
+                    child: Text(
+                      driver.name.isNotEmpty ? driver.name[0].toUpperCase() : '?',
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(driver.name,
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text(
+                          '${vehicleType[0].toUpperCase()}${vehicleType.substring(1)} • ${driver.rating} ★',
+                          style: TextStyle(color: Colors.grey[700]),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '≈ ${dist.toStringAsFixed(1)} km from pickup',
+                          style: const TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: onClose,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Row(
+              //   children: [
+              //     Expanded(
+              //       child: ElevatedButton.icon(
+              //         onPressed: () {},
+              //         icon: const Icon(Icons.phone, size: 18),
+              //         label: const Text('Call'),
+              //         style: ElevatedButton.styleFrom(
+              //           backgroundColor: Colors.green,
+              //           foregroundColor: Colors.white,
+              //         ),
+              //       ),
+              //     ),
+              //     const SizedBox(width: 8),
+              //     Expanded(
+              //       child: ElevatedButton.icon(
+              //         onPressed: () {},
+              //         icon: const Icon(Icons.message, size: 18),
+              //         label: const Text('Message'),
+              //         style: ElevatedButton.styleFrom(
+              //           backgroundColor: Colors.blue,
+              //           foregroundColor: Colors.white,
+              //         ),
+              //       ),
+              //     ),
+              //   ],
+              // ),
+            ],
+          ),
+        ),
       ),
     );
   }
