@@ -443,6 +443,7 @@ if (_request?.status == 'pending' || _request?.status == 'searching')
           final confirm = await showDialog<bool>(
             context: context,
             builder: (_) => AlertDialog(
+              backgroundColor: const Color(0xFF1A2B7B),
               title: const Text('Cancel Delivery Request'),
               content: const Text(
                 'Are you sure you want to cancel this request?',

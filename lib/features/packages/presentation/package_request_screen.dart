@@ -8,14 +8,13 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../../global/global_vars.dart'; // sharedPreferences
+import '../../../global/global_vars.dart';
 import '../../maps/map_fullscreen_picker.dart';
 import '../../../core/services/places_service.dart';
-
-// Create + navigate to map
 import '../../../core/models/request_model.dart';
 import '../../../core/services/request_service.dart';
 import '../../maps/presentation/request_map_screen.dart';
+import '../../../core/services/fare_service.dart';
 
 Future<void> showPackageRequestModal({
   required BuildContext context,
@@ -86,6 +85,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
   late LatLng _currentDestinationLatLng;
 
   bool _isSubmitting = false;
+  final FareService _fareService = FareService();
 
   String get _vehicleType => widget.deliveryMethod.toLowerCase();
 
@@ -97,9 +97,11 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     _currentPickupLatLng = widget.pickupLatLng;
     _currentDestinationLatLng = widget.destinationLatLng;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadSenderPhone());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadSenderPhone();
+      _calculateAndUpdatePrice();
+    });
 
-    _calculateAndUpdatePrice();
     _senderPhoneCtrl.addListener(() => setState(() {}));
     _receiverPhoneCtrl.addListener(() => setState(() {}));
   }
@@ -129,24 +131,23 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     }
   }
 
-  /// Edit sender number — dialog with WHITE text on dark background
   Future<void> _editSenderNumber() async {
     final ctrl = TextEditingController(text: _senderPhoneCtrl.text);
 
     final result = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: Colors.black, // dark bg
+        backgroundColor: const Color(0xFF1A2B7B),
         titleTextStyle: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
-        contentTextStyle: const TextStyle(color: Colors.white), // white words
+        contentTextStyle: const TextStyle(color: Colors.white),
         title: const Text('Enter Sender Number'),
         content: TextField(
           controller: ctrl,
           keyboardType: TextInputType.phone,
-          style: const TextStyle(color: Colors.white),        // WHITE TEXT
+          style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
             hintText: 'e.g. 0977 123 456 or +260 977 123 456',
-            hintStyle: TextStyle(color: Colors.white70),      // white-ish hint
+            hintStyle: TextStyle(color: Colors.white70),
             enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white38)),
             focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
           ),
@@ -202,19 +203,32 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
 
   // -------------------- Pricing --------------------
 
-  void _calculateAndUpdatePrice() {
-    setState(() => totalCharge = _estimateCharge());
+  Future<void> _calculateAndUpdatePrice() async {
+    final charge = await _estimateCharge();
+    if (mounted) {
+      setState(() => totalCharge = charge);
+    }
   }
 
-  double _estimateCharge() {
-    const baseFare = 20.0;
-    const perKm = 5.0;
+  Future<double> _estimateCharge() async {
     if (!_isValidLatLng(_currentPickupLatLng) ||
         !_isValidLatLng(_currentDestinationLatLng)) {
       return 0.0;
     }
-    final d = _km(_currentPickupLatLng, _currentDestinationLatLng);
-    return baseFare + d * perKm;
+
+    final baseFare = await _fareService.getBaseFare(_vehicleType);
+    final pricePerKm = await _fareService.getPricePerKm(_vehicleType);
+
+    final distance = _km(_currentPickupLatLng, _currentDestinationLatLng);
+
+    // Debug logging
+    print('📏 Calculated distance: ${distance.toStringAsFixed(2)} km');
+    print('💰 Base fare: $baseFare, Price per km: $pricePerKm');
+
+    final total = baseFare + (distance * pricePerKm);
+    print('💵 Total charge: $total');
+
+    return total;
   }
 
   bool _isValidLatLng(LatLng p) =>
@@ -407,9 +421,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
         return;
       }
 
-      final distance = _km(_currentPickupLatLng, _currentDestinationLatLng);
-      final estimatedFare =
-      RequestService().calculateEstimatedFare(distance, _vehicleType);
+      final estimatedFare = totalCharge ?? 0.0;
 
       final req = RideRequest(
         id: '',
@@ -465,22 +477,21 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     const themeColor = Color(0xFF1A2B7B);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    return Stack(
-      children: [
-        Container(
-          height: MediaQuery.of(context).size.height * 0.9,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          padding: EdgeInsets.fromLTRB(16, 16, 16, bottomInset + 16),
-          child: Column(
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.9,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Stack(
+        children: [
+          Column(
             children: [
               // Handle
               Container(
                 width: 44,
                 height: 5,
-                margin: const EdgeInsets.only(bottom: 16),
+                margin: const EdgeInsets.only(top: 16, bottom: 16),
                 decoration: BoxDecoration(
                   color: Colors.black26,
                   borderRadius: BorderRadius.circular(8),
@@ -525,71 +536,90 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
               const SizedBox(height: 12),
 
               Expanded(
-                child: SingleChildScrollView(
-                  child: Column(
-                    children: [
-                      _sectionHeader('Pickup Location'),
-                      const SizedBox(height: 8),
-                      _addressField(label: 'Pickup Address', controller: _pickupCtrl, isPickup: true),
-                      const SizedBox(height: 12),
-                      _editablePhoneField(controller: _senderPhoneCtrl, onEdit: _editSenderNumber),
-                      const SizedBox(height: 12),
-                      _attachButton('Attach pickup photos', true),
-                      if (pickupPhotos.isNotEmpty) _photoPreview(pickupPhotos, true),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        _sectionHeader('Pickup Location'),
+                        const SizedBox(height: 8),
+                        _addressField(label: 'Pickup Address', controller: _pickupCtrl, isPickup: true),
+                        const SizedBox(height: 12),
+                        _editablePhoneField(controller: _senderPhoneCtrl, onEdit: _editSenderNumber),
+                        const SizedBox(height: 12),
+                        _attachButton('Attach pickup photos', true),
+                        if (pickupPhotos.isNotEmpty) _photoPreview(pickupPhotos, true),
 
-                      const Divider(height: 30),
+                        const Divider(height: 30),
 
-                      _sectionHeader('Destination Location'),
-                      const SizedBox(height: 8),
-                      _addressField(label: 'Destination Address', controller: _destCtrl, isPickup: false),
-                      const SizedBox(height: 12),
-                      _contactField('Receiver phone number', _receiverPhoneCtrl),
-                      const SizedBox(height: 12),
-                      _attachButton('Attach destination photos', false),
-                      if (destinationPhotos.isNotEmpty) _photoPreview(destinationPhotos, false),
+                        _sectionHeader('Destination Location'),
+                        const SizedBox(height: 8),
+                        _addressField(label: 'Destination Address', controller: _destCtrl, isPickup: false),
+                        const SizedBox(height: 12),
+                        _contactField('Receiver phone number', _receiverPhoneCtrl),
+                        const SizedBox(height: 12),
+                        _attachButton('Attach destination photos', false),
+                        if (destinationPhotos.isNotEmpty) _photoPreview(destinationPhotos, false),
 
-                      const SizedBox(height: 20),
-                      Text(
-                        'Estimated charge: K${totalCharge?.toStringAsFixed(2) ?? '0.00'}',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black),
-                      ),
-                      const SizedBox(height: 20),
-                      SizedBox(height: MediaQuery.of(context).viewInsets.bottom > 0 ? 100 : 20),
-                    ],
-                  ),
-                ),
-              ),
-
-              SafeArea(
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isFormValid && !_isSubmitting ? _submitRequest : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _isFormValid && !_isSubmitting ? themeColor : Colors.grey,
-                      foregroundColor: Colors.white,
-                      minimumSize: const Size(double.infinity, 52),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
+                        const SizedBox(height: 20),
+                        Text(
+                          'Estimated charge: K${totalCharge?.toStringAsFixed(2) ?? '0.00'}',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black),
+                        ),
+                        SizedBox(height: MediaQuery.of(context).viewInsets.bottom + 120), // Space for the button
+                      ],
                     ),
-                    child: Text('Request ${_vehicleType.toUpperCase()} Delivery',
-                        style: const TextStyle(fontSize: 16)),
                   ),
                 ),
               ),
             ],
           ),
-        ),
 
-        if (_isSubmitting)
-          Positioned.fill(
-            child: Container(
-              color: Colors.black54,
-              child: const Center(child: CircularProgressIndicator()),
+          // Fixed submit button at bottom
+          Positioned(
+            left: 16,
+            right: 16,
+            bottom: bottomInset + 16,
+            child: SafeArea(
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _isFormValid && !_isSubmitting ? _submitRequest : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isFormValid && !_isSubmitting ? themeColor : Colors.grey,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 52),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  child: _isSubmitting
+                      ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation(Colors.white),
+                    ),
+                  )
+                      : Text('Request ${_vehicleType.toUpperCase()} Delivery',
+                      style: const TextStyle(fontSize: 16)),
+                ),
+              ),
             ),
           ),
-      ],
+
+          if (_isSubmitting)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black54,
+                child: const Center(
+                  child: CircularProgressIndicator(),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -602,7 +632,6 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     ),
   );
 
-  // ===== Autocomplete field (white background, black words) =====
   Widget _addressField({
     required String label,
     required TextEditingController controller,
@@ -614,7 +643,6 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
       children: [
         Text(label, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
         Theme(
-          // Force suggestions overlay and tiles to be white with black text
           data: theme.copyWith(
             cardColor: Colors.white,
             dialogBackgroundColor: Colors.white,
@@ -690,8 +718,8 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
                       ),
                     ],
                   ),
-                  filled: true,                 // WHITE BACKGROUND
-                  fillColor: Colors.white,      // WHITE BACKGROUND
+                  filled: true,
+                  fillColor: Colors.white,
                   border: const UnderlineInputBorder(),
                   focusedBorder: const UnderlineInputBorder(
                     borderSide: BorderSide(color: Color(0xFF1A2B7B)),
