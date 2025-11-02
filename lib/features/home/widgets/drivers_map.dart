@@ -5,6 +5,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../maps/nearby_drivers_view_model.dart';
 
@@ -26,11 +27,51 @@ class _DriversMapState extends State<DriversMap> {
   MapType _mapType = MapType.normal;
   BitmapDescriptor? _bikeIcon;
   BitmapDescriptor? _bicycleIcon;
+  GoogleMapController? _controller;
+  LatLng? _currentLatLng;
 
   @override
   void initState() {
     super.initState();
     _loadCustomIcons();
+    _determinePosition();
+  }
+
+  /// Get current position and move camera to that position
+  Future<void> _determinePosition() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return;
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) return;
+    }
+
+    if (permission == LocationPermission.deniedForever) return;
+
+    final pos = await Geolocator.getCurrentPosition();
+    final LatLng latLng = LatLng(pos.latitude, pos.longitude);
+
+    setState(() {
+      _currentLatLng = latLng;
+    });
+
+    if (_controller != null) {
+      _controller!.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(
+            target: latLng,
+            zoom: 16, // same deep zoom level as before
+            tilt: 60,   // same 3D street view tilt
+            bearing: 30, // same angle
+          ),
+        ),
+      );
+    }
   }
 
   /// Resize and convert asset image to a smaller BitmapDescriptor
@@ -41,13 +82,14 @@ class _DriversMapState extends State<DriversMap> {
       targetWidth: width,
     );
     final frame = await codec.getNextFrame();
-    final resized = await frame.image.toByteData(format: ui.ImageByteFormat.png);
+    final resized =
+    await frame.image.toByteData(format: ui.ImageByteFormat.png);
     return BitmapDescriptor.fromBytes(resized!.buffer.asUint8List());
   }
 
   Future<void> _loadCustomIcons() async {
-    final bike = await _resizeImage('images/motorbike.png', 280);   // smaller size
-    final bicycle = await _resizeImage('images/bicycle.png', 290); // smaller size
+    final bike = await _resizeImage('images/motorbike.png', 280);
+    final bicycle = await _resizeImage('images/bicycle.png', 290);
 
     setState(() {
       _bikeIcon = bike;
@@ -82,12 +124,29 @@ class _DriversMapState extends State<DriversMap> {
       children: [
         GoogleMap(
           initialCameraPosition: CameraPosition(
-            target: widget.initial,
-            zoom: 17.5, // deeper street view
-            tilt: 60,   // stronger 3D angle
+            target: _currentLatLng ?? widget.initial,
+            zoom: 17.5, // keep original deep zoom
+            tilt: 60,   // same street angle
             bearing: 30,
           ),
-          onMapCreated: widget.onCreated,
+          onMapCreated: (controller) {
+            _controller = controller;
+            widget.onCreated(controller);
+
+            // move camera to current location when available
+            if (_currentLatLng != null) {
+              controller.animateCamera(
+                CameraUpdate.newCameraPosition(
+                  CameraPosition(
+                    target: _currentLatLng!,
+                    zoom: 17.5,
+                    tilt: 60,
+                    bearing: 30,
+                  ),
+                ),
+              );
+            }
+          },
           mapType: _mapType,
           markers: markers,
           buildingsEnabled: true,
@@ -97,7 +156,8 @@ class _DriversMapState extends State<DriversMap> {
           compassEnabled: true,
           zoomControlsEnabled: false,
           gestureRecognizers: <Factory<OneSequenceGestureRecognizer>>{
-            Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+            Factory<OneSequenceGestureRecognizer>(
+                    () => EagerGestureRecognizer()),
           },
         ),
 
@@ -118,8 +178,7 @@ class _DriversMapState extends State<DriversMap> {
           ),
         ),
 
-        if (vm.loading)
-          const Center(child: CircularProgressIndicator()),
+        if (vm.loading) const Center(child: CircularProgressIndicator()),
 
         if (vm.error != null)
           Positioned(

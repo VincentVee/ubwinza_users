@@ -1,12 +1,13 @@
-// lib/features/packages/presentation/package_request_modal.dart
 import 'dart:io';
 import 'dart:math';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:flutter_typeahead/flutter_typeahead.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:http/http.dart' as http;
 
 import '../../../global/global_vars.dart';
 import '../../maps/map_fullscreen_picker.dart';
@@ -26,6 +27,7 @@ Future<void> showPackageRequestModal({
   required bool fragile,
   required String packageName,
   required String deliveryMethod,
+  required double initialDistanceKm,
 }) {
   return showModalBottomSheet(
     context: context,
@@ -41,6 +43,7 @@ Future<void> showPackageRequestModal({
       fragile: fragile,
       packageName: packageName,
       deliveryMethod: deliveryMethod,
+      initialDistanceKm: initialDistanceKm,
     ),
   );
 }
@@ -54,6 +57,7 @@ class PackageRequestModal extends StatefulWidget {
   final bool fragile;
   final String packageName;
   final String deliveryMethod;
+  final double initialDistanceKm;
 
   const PackageRequestModal({
     super.key,
@@ -65,6 +69,7 @@ class PackageRequestModal extends StatefulWidget {
     required this.fragile,
     required this.packageName,
     required this.deliveryMethod,
+    required this.initialDistanceKm,
   });
 
   @override
@@ -83,8 +88,10 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
 
   late LatLng _currentPickupLatLng;
   late LatLng _currentDestinationLatLng;
+  double _currentDistanceKm = 0.0;
 
   bool _isSubmitting = false;
+  bool _isCalculatingDistance = false;
   final FareService _fareService = FareService();
 
   String get _vehicleType => widget.deliveryMethod.toLowerCase();
@@ -96,6 +103,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     _destCtrl.text = widget.destinationAddress;
     _currentPickupLatLng = widget.pickupLatLng;
     _currentDestinationLatLng = widget.destinationLatLng;
+    _currentDistanceKm = widget.initialDistanceKm;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadSenderPhone();
@@ -201,39 +209,75 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     return false;
   }
 
-  // -------------------- Pricing --------------------
+  // -------------------- Dynamic Distance Calculation --------------------
 
-  Future<void> _calculateAndUpdatePrice() async {
-    final charge = await _estimateCharge();
-    if (mounted) {
-      setState(() => totalCharge = charge);
-    }
-  }
-
-  Future<double> _estimateCharge() async {
+  Future<void> _calculateDistance() async {
     if (!_isValidLatLng(_currentPickupLatLng) ||
         !_isValidLatLng(_currentDestinationLatLng)) {
-      return 0.0;
+      setState(() => _currentDistanceKm = 0.0);
+      return;
     }
 
-    final baseFare = await _fareService.getBaseFare(_vehicleType);
-    final pricePerKm = await _fareService.getPricePerKm(_vehicleType);
+    setState(() => _isCalculatingDistance = true);
 
-    final distance = _km(_currentPickupLatLng, _currentDestinationLatLng);
-
-    // Debug logging
-    print('📏 Calculated distance: ${distance.toStringAsFixed(2)} km');
-    print('💰 Base fare: $baseFare, Price per km: $pricePerKm');
-
-    final total = baseFare + (distance * pricePerKm);
-    print('💵 Total charge: $total');
-
-    return total;
+    try {
+      final distance = await _getRoadDistance(
+        _currentPickupLatLng,
+        _currentDestinationLatLng,
+      );
+      setState(() => _currentDistanceKm = distance);
+      print('🛣️  Road distance calculated: ${distance.toStringAsFixed(2)} km');
+    } catch (e) {
+      final haversineDistance = _km(_currentPickupLatLng, _currentDestinationLatLng);
+      setState(() => _currentDistanceKm = haversineDistance);
+      print('📏 Using Haversine distance: ${haversineDistance.toStringAsFixed(2)} km');
+      print('⚠️  Road distance API failed: $e');
+    } finally {
+      setState(() => _isCalculatingDistance = false);
+    }
   }
 
-  bool _isValidLatLng(LatLng p) =>
-      p.latitude >= -90 && p.latitude <= 90 && p.longitude >= -180 && p.longitude <= 180;
+  Future<double> _getRoadDistance(LatLng origin, LatLng destination) async {
+    try {
+      final result = await _fetchDirections(
+        origin: origin,
+        destination: destination,
+        apiKey: widget.places.apiKey,
+      );
 
+      if (result.distanceText != null) {
+        return _extractDistanceFromText(result.distanceText!);
+      }
+
+      throw Exception('No distance in route result');
+    } catch (e) {
+      throw Exception('Failed to get road distance: $e');
+    }
+  }
+
+  double _extractDistanceFromText(String distanceText) {
+    try {
+      final regex = RegExp(r'([\d.]+)');
+      final match = regex.firstMatch(distanceText);
+      if (match != null) {
+        double value = double.parse(match.group(1)!);
+
+        if (distanceText.contains('mi')) {
+          value *= 1.60934;
+        } else if (distanceText.contains('m') && !distanceText.contains('km')) {
+          value /= 1000;
+        }
+
+        return value;
+      }
+    } catch (e) {
+      print('Error parsing distance text: $e');
+    }
+
+    throw Exception('Could not parse distance text: $distanceText');
+  }
+
+  // Haversine formula as fallback
   double _km(LatLng a, LatLng b) {
     const R = 6371.0;
     final dLat = _deg2rad(b.latitude - a.latitude);
@@ -246,6 +290,33 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
   }
 
   double _deg2rad(double deg) => deg * (pi / 180);
+
+  bool _isValidLatLng(LatLng p) =>
+      p.latitude >= -90 && p.latitude <= 90 && p.longitude >= -180 && p.longitude <= 180;
+
+  // -------------------- Pricing --------------------
+
+  Future<void> _calculateAndUpdatePrice() async {
+    final charge = await _estimateCharge();
+    if (mounted) {
+      setState(() => totalCharge = charge);
+    }
+  }
+
+  Future<double> _estimateCharge() async {
+    if (_currentDistanceKm <= 0) return 0.0;
+
+    final baseFare = await _fareService.getBaseFare(_vehicleType);
+    final pricePerKm = await _fareService.getPricePerKm(_vehicleType);
+
+    print('📏 Using distance: ${_currentDistanceKm.toStringAsFixed(2)} km');
+    print('💰 Base fare: $baseFare, Price per km: $pricePerKm');
+
+    final total = (_currentDistanceKm * pricePerKm);//baseFare +
+    print('💵 Total charge: ${total.toStringAsFixed(2)}');
+
+    return total;
+  }
 
   bool get _isFormValid =>
       _pickupCtrl.text.trim().isNotEmpty &&
@@ -392,6 +463,8 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
         _currentDestinationLatLng = LatLng(lat, lng);
       }
     });
+
+    await _calculateDistance();
     _calculateAndUpdatePrice();
   }
 
@@ -478,148 +551,181 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     return Container(
-      height: MediaQuery.of(context).size.height * 0.9,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Stack(
+        height: MediaQuery.of(context).size.height * 0.9,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Stack(
+          children: [
+        Column(
         children: [
-          Column(
+        Container(
+        width: 44,
+          height: 5,
+          margin: const EdgeInsets.only(top: 16, bottom: 16),
+          decoration: BoxDecoration(
+            color: Colors.black26,
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+        const Text(
+          'Package Delivery Details',
+          style: TextStyle(
+            color: themeColor,
+            fontWeight: FontWeight.bold,
+            fontSize: 18,
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: themeColor.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Handle
-              Container(
-                width: 44,
-                height: 5,
-                margin: const EdgeInsets.only(top: 16, bottom: 16),
-                decoration: BoxDecoration(
-                  color: Colors.black26,
-                  borderRadius: BorderRadius.circular(8),
-                ),
+              Icon(
+                _vehicleType == 'motorbike' ? Icons.two_wheeler : Icons.pedal_bike,
+                color: themeColor,
               ),
-              const Text(
-                'Package Delivery Details',
+              const SizedBox(width: 8),
+              Text(
+                'Delivery Method: ${widget.deliveryMethod}',
                 style: TextStyle(
                   color: themeColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // Delivery method chip
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: themeColor.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      _vehicleType == 'motorbike' ? Icons.two_wheeler : Icons.pedal_bike,
-                      color: themeColor,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Delivery Method: ${widget.deliveryMethod}',
-                      style: TextStyle(
-                        color: themeColor,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: SingleChildScrollView(
-                    child: Column(
-                      children: [
-                        _sectionHeader('Pickup Location'),
-                        const SizedBox(height: 8),
-                        _addressField(label: 'Pickup Address', controller: _pickupCtrl, isPickup: true),
-                        const SizedBox(height: 12),
-                        _editablePhoneField(controller: _senderPhoneCtrl, onEdit: _editSenderNumber),
-                        const SizedBox(height: 12),
-                        _attachButton('Attach pickup photos', true),
-                        if (pickupPhotos.isNotEmpty) _photoPreview(pickupPhotos, true),
-
-                        const Divider(height: 30),
-
-                        _sectionHeader('Destination Location'),
-                        const SizedBox(height: 8),
-                        _addressField(label: 'Destination Address', controller: _destCtrl, isPickup: false),
-                        const SizedBox(height: 12),
-                        _contactField('Receiver phone number', _receiverPhoneCtrl),
-                        const SizedBox(height: 12),
-                        _attachButton('Attach destination photos', false),
-                        if (destinationPhotos.isNotEmpty) _photoPreview(destinationPhotos, false),
-
-                        const SizedBox(height: 20),
-                        Text(
-                          'Estimated charge: K${totalCharge?.toStringAsFixed(2) ?? '0.00'}',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.black),
-                        ),
-                        SizedBox(height: MediaQuery.of(context).viewInsets.bottom + 120), // Space for the button
-                      ],
-                    ),
-                  ),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
                 ),
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 12),
 
-          // Fixed submit button at bottom
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: bottomInset + 16,
-            child: SafeArea(
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isFormValid && !_isSubmitting ? _submitRequest : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isFormValid && !_isSubmitting ? themeColor : Colors.grey,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size(double.infinity, 52),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  child: _isSubmitting
-                      ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation(Colors.white),
-                    ),
-                  )
-                      : Text('Request ${_vehicleType.toUpperCase()} Delivery',
-                      style: const TextStyle(fontSize: 16)),
-                ),
-              ),
-            ),
-          ),
+        Expanded(
+            child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: SingleChildScrollView(
+                    child: Column(
+                        children: [
+                        _sectionHeader('Pickup Location'),
+                    const SizedBox(height: 8),
+                    _addressField(label: 'Pickup Address', controller: _pickupCtrl, isPickup: true),
+                    const SizedBox(height: 12),
+                    _editablePhoneField(controller: _senderPhoneCtrl, onEdit: _editSenderNumber),
+                    const SizedBox(height: 12),
+                    _attachButton('Attach pickup photos', true),
+                    if (pickupPhotos.isNotEmpty) _photoPreview(pickupPhotos, true),
 
-          if (_isSubmitting)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black54,
-                child: const Center(
-                  child: CircularProgressIndicator(),
+            const Divider(height: 30),
+
+            _sectionHeader('Destination Location'),
+            const SizedBox(height: 8),
+            _addressField(label: 'Destination Address', controller: _destCtrl, isPickup: false),
+            const SizedBox(height: 12),
+            _contactField('Receiver phone number', _receiverPhoneCtrl),
+            const SizedBox(height: 12),
+            _attachButton('Attach destination photos', false),
+
+            if (destinationPhotos.isNotEmpty) _photoPreview(destinationPhotos, false),
+
+                          const SizedBox(height: 20),
+
+                          // Distance and Price Display
+                          Column(
+                            children: [
+                              if (_isCalculatingDistance)
+                                const Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text('Calculating distance...'),
+                                  ],
+                                )
+                              else
+                                Text(
+                                  'Distance: ${_currentDistanceKm.toStringAsFixed(1)} km',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Estimated charge: K${totalCharge?.toStringAsFixed(2) ?? '0.00'}',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ],
+                          ),
+                          SizedBox(height: MediaQuery.of(context).viewInsets.bottom + 120),
+
+                        ],
+                    ),
                 ),
-              ),
             ),
+        ),
         ],
-      ),
+        ),
+
+            // Fixed submit button at bottom
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: bottomInset + 16,
+              child: SafeArea(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isFormValid && !_isSubmitting && !_isCalculatingDistance ? _submitRequest : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isFormValid && !_isSubmitting && !_isCalculatingDistance ? themeColor : Colors.grey,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: _isSubmitting
+                        ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation(Colors.white),
+                      ),
+                    )
+                        : Text('Request ${_vehicleType.toUpperCase()} Delivery',
+                        style: const TextStyle(fontSize: 16)),
+                  ),
+                ),
+              ),
+            ),
+
+            if (_isSubmitting)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black54,
+                  child: const Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                ),
+              ),
+          ],
+        ),
     );
   }
 
@@ -676,6 +782,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
                   _currentDestinationLatLng = info.latLng;
                 }
               });
+              await _calculateDistance();
               _calculateAndUpdatePrice();
             },
             builder: (context, textController, focusNode) {
@@ -713,6 +820,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
                               _currentDestinationLatLng = const LatLng(0, 0);
                             }
                           });
+                          _calculateDistance();
                           _calculateAndUpdatePrice();
                         },
                       ),
@@ -863,6 +971,92 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
       ),
     );
   }
+}
+
+// ---------- HTTP Directions Helper ----------
+
+class _DirectionsResult {
+  _DirectionsResult({
+    required this.points,
+    required this.distanceText,
+    required this.durationText,
+  });
+
+  final List<LatLng> points;
+  final String? distanceText;
+  final String? durationText;
+}
+
+Future<_DirectionsResult> _fetchDirections({
+  required LatLng origin,
+  required LatLng destination,
+  required String apiKey,
+}) async {
+  final url = Uri.parse(
+    'https://maps.googleapis.com/maps/api/directions/json'
+        '?origin=${origin.latitude},${origin.longitude}'
+        '&destination=${destination.latitude},${destination.longitude}'
+        '&mode=driving'
+        '&key=$apiKey',
+  );
+
+  final resp = await http.get(url);
+  if (resp.statusCode != 200) {
+    throw Exception('Directions failed');
+  }
+  final data = json.decode(resp.body) as Map<String, dynamic>;
+  final routes = data['routes'] as List?;
+  if (routes == null || routes.isEmpty) {
+    throw Exception('No route');
+  }
+
+  final overview = routes.first['overview_polyline']?['points'] as String?;
+  final points = overview == null ? <LatLng>[] : _decodePolyline(overview);
+
+  String? distanceText;
+  String? durationText;
+  final legs = routes.first['legs'] as List?;
+  if (legs != null && legs.isNotEmpty) {
+    final leg = legs.first as Map<String, dynamic>;
+    distanceText = leg['distance']?['text'] as String?;
+    durationText = leg['duration']?['text'] as String?;
+  }
+
+  return _DirectionsResult(
+    points: points,
+    distanceText: distanceText,
+    durationText: durationText,
+  );
+}
+
+List<LatLng> _decodePolyline(String encoded) {
+  List<LatLng> poly = [];
+  int index = 0, len = encoded.length;
+  int lat = 0, lng = 0;
+
+  while (index < len) {
+    int b, shift = 0, result = 0;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    int dlat = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    lat += dlat;
+
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.codeUnitAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    int dlng = (result & 1) != 0 ? ~(result >> 1) : (result >> 1);
+    lng += dlng;
+
+    poly.add(LatLng(lat / 1e5, lng / 1e5));
+  }
+  return poly;
 }
 
 // Dark contact sheet
