@@ -18,6 +18,8 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   String? _selectedSize;
   String? _variation;
   final Set<String> _selectedAddons = {};
+  bool _isAddingToCart = false;
+  bool _isImageLoaded = false;
 
   @override
   void initState() {
@@ -25,6 +27,27 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     if (widget.food.sizes.isNotEmpty) {
       _selectedSize = widget.food.sizes.first['name'];
     }
+    _preloadImage();
+  }
+
+  // Preload the image
+  void _preloadImage() {
+    final image = NetworkImage(widget.food.imageUrl);
+    final stream = image.resolve(const ImageConfiguration());
+    stream.addListener(
+      ImageStreamListener(
+            (info, call) {
+          if (mounted) {
+            setState(() => _isImageLoaded = true);
+          }
+        },
+        onError: (exception, stackTrace) {
+          if (mounted) {
+            setState(() => _isImageLoaded = true);
+          }
+        },
+      ),
+    );
   }
 
   // 🧮 Total Price Calculation - FIXED to use exact DB prices
@@ -36,7 +59,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     if (_selectedAddons.isNotEmpty && widget.food.addons != null) {
       for (final addonName in _selectedAddons) {
         final addon = widget.food.addons!.firstWhere(
-          (a) => a['name'] == addonName,
+              (a) => a['name'] == addonName,
           orElse: () => <String, dynamic>{},
         );
         if (addon.isNotEmpty) {
@@ -52,12 +75,12 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   // 🧩 Helper for selected size price - EXACT from DB
   double _getSelectedSizePrice() {
     if (widget.food.sizes.isEmpty) return widget.food.price;
-    
+
     final selected = widget.food.sizes.firstWhere(
-      (s) => s['name'] == _selectedSize,
+          (s) => s['name'] == _selectedSize,
       orElse: () => {'price': widget.food.price},
     );
-    
+
     // Return EXACT price from DB, no modifications
     return _safePriceToDouble(selected['price']);
   }
@@ -72,32 +95,52 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
   }
 
   // 🛒 Add to Cart with all selections
-  void _addToCart() {
-    final totalPrice = _calculateTotalPrice();
-    
-    // Add to cart using your CartProvider with the calculated totalPrice
-    Provider.of<CartProvider>(context, listen: false).add(
-      widget.food,
-      size: _selectedSize,
-      variation: _variation,
-      addons: _selectedAddons.isNotEmpty ? _selectedAddons.toList() : null,
-      totalPrice: totalPrice, // ✅ Pass the calculated total price
-      qty: _qty,
-    );
-    
-    // Show confirmation
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Added ${widget.food.name} (${_qty}x) - K${totalPrice.toStringAsFixed(2)} to cart!',
+  Future<void> _addToCart() async {
+    setState(() => _isAddingToCart = true);
+
+    try {
+      final totalPrice = _calculateTotalPrice();
+
+      // Add to cart using your CartProvider with the calculated totalPrice
+      Provider.of<CartProvider>(context, listen: false).add(
+        widget.food,
+        size: _selectedSize,
+        variation: _variation,
+        addons: _selectedAddons.isNotEmpty ? _selectedAddons.toList() : null,
+        totalPrice: totalPrice,
+        qty: _qty,
+      );
+
+      // Simulate a brief delay for better UX (remove if not needed)
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      if (!mounted) return;
+
+      // Show confirmation
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Added ${widget.food.name} (${_qty}x) - K${totalPrice.toStringAsFixed(2)} to cart!',
+          ),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.green,
         ),
-        duration: const Duration(seconds: 2),
-        backgroundColor: Colors.green,
-      ),
-    );
-    
-    // Optionally navigate back or to cart screen
-    // Navigator.pop(context);
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error adding to cart: $e'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isAddingToCart = false);
+      }
+    }
   }
 
   @override
@@ -120,33 +163,62 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
+      body: !_isImageLoaded
+          ? Container(
+        color: const Color(0xFFB8B4B4),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(
+                color: Color(0xFF1A2B7B),
+                strokeWidth: 3,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Loading ${f.name}...',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ),
+      )
+          : Column(
         children: [
+          // 🍽️ Food Image - STATIC/FIXED
+          Container(
+            color: const Color(0xFFB8B4B4),
+            padding: const EdgeInsets.all(16),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                f.imageUrl,
+                height: 220,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  height: 220,
+                  width: double.infinity,
+                  color: Colors.grey[300],
+                  child: const Icon(Icons.fastfood, size: 60, color: Colors.grey),
+                ),
+              ),
+            ),
+          ),
+
+          // Scrollable Content Below
           Expanded(
             child: Container(
               color: const Color(0xFFB8B4B4),
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 🍽️ Food Image
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        f.imageUrl,
-                        height: 220,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          height: 220,
-                          width: double.infinity,
-                          color: Colors.grey[300],
-                          child: const Icon(Icons.fastfood, size: 60, color: Colors.grey),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
 
                     // 📝 Name and Price
                     Row(
@@ -195,7 +267,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: f.sizes.map((size) {
                           final name = size['name'] ?? 'Regular';
-                          final price = _safePriceToDouble(size['price']); // EXACT DB price
+                          final price = _safePriceToDouble(size['price']);
                           final selected = _selectedSize == name;
 
                           return RadioListTile<String>(
@@ -240,7 +312,6 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                             selected: selected,
                             selectedColor: const Color(0xFF1A2B7B),
                             onSelected: (_) => setState(() {
-                              // Toggle: if already selected, unselect it
                               _variation = selected ? null : v;
                             }),
                           );
@@ -300,8 +371,8 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                             children: [
                               IconButton(
                                 icon: Icon(Icons.remove, color: _qty > 1 ? Colors.black : Colors.grey),
-                                onPressed: _qty > 1 
-                                    ? () => setState(() => _qty--) 
+                                onPressed: _qty > 1
+                                    ? () => setState(() => _qty--)
                                     : null,
                               ),
                               Container(
@@ -309,9 +380,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                                 child: Text(
                                   _qty.toString(),
                                   style: const TextStyle(
-                                    fontSize: 18, 
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.black
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black
                                   ),
                                 ),
                               ),
@@ -324,7 +395,7 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 100), // Extra space for button
+                    const SizedBox(height: 100),
                   ],
                 ),
               ),
@@ -345,8 +416,17 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                   ),
-                  onPressed: _addToCart,
-                  child: Row(
+                  onPressed: _isAddingToCart ? null : _addToCart,
+                  child: _isAddingToCart
+                      ? const SizedBox(
+                    height: 24,
+                    width: 24,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2.5,
+                    ),
+                  )
+                      : Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       const Row(

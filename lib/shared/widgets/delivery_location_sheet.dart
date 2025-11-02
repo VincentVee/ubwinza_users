@@ -34,33 +34,37 @@ class _DeliveryLocationSheet extends StatefulWidget {
   State<_DeliveryLocationSheet> createState() => _DeliveryLocationSheetState();
 }
 
-class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet> 
+class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     with SingleTickerProviderStateMixin {
   GoogleMapController? _mapController;
   LatLng? _currentPosition;
   String _address = 'Move the map to select location';
   bool _isLoadingAddress = false;
   bool _isDragging = false;
-  bool _hasSelectedLocation = false; // NEW: Track if location is selected
+  bool _hasSelectedLocation = false;
   late AnimationController _pinAnimationController;
   late Animation<double> _pinAnimation;
+
+  // Debounce timer for address lookup
+  Timer? _debounceTimer;
 
   // Camera position state
   CameraPosition? _currentCameraPosition;
 
   static const _fallback = LatLng(-15.3875, 28.3228); // Lusaka, Zambia
+  static const _debounceDuration = Duration(milliseconds: 800);
 
   @override
   void initState() {
     super.initState();
     _initializeData();
-    
+
     // Setup pin animation
     _pinAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 200),
+      duration: const Duration(milliseconds: 150),
       vsync: this,
     );
-    
+
     _pinAnimation = Tween<double>(begin: 0, end: -20).animate(
       CurvedAnimation(
         parent: _pinAnimationController,
@@ -75,7 +79,6 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
       target: _currentPosition!,
       zoom: 15,
     );
-    // Don't automatically get address on init - wait for user interaction
     _hasSelectedLocation = widget.initialTarget != null;
     if (_hasSelectedLocation) {
       _getAddressFromLatLng(_currentPosition!);
@@ -84,6 +87,7 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _pinAnimationController.dispose();
     _mapController?.dispose();
     super.dispose();
@@ -91,7 +95,8 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
 
   Future<void> _getAddressFromLatLng(LatLng position) async {
     if (_isLoadingAddress) return;
-    
+
+    if (!mounted) return;
     setState(() {
       _isLoadingAddress = true;
     });
@@ -102,32 +107,35 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
         position.longitude,
       );
 
+      if (!mounted) return;
+
       if (placemarks.isNotEmpty) {
         final Placemark place = placemarks[0];
         setState(() {
           _address = _formatAddress(place);
           _isLoadingAddress = false;
-          _hasSelectedLocation = true; // NEW: Mark as selected when address is found
+          _hasSelectedLocation = true;
         });
       } else {
         setState(() {
           _address = 'Address not found';
           _isLoadingAddress = false;
-          _hasSelectedLocation = true; // NEW: Still mark as selected even if address not found
+          _hasSelectedLocation = true;
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _address = 'Unable to get address';
         _isLoadingAddress = false;
-        _hasSelectedLocation = true; // NEW: Mark as selected even on error
+        _hasSelectedLocation = true;
       });
     }
   }
 
   String _formatAddress(Placemark place) {
     final List<String> parts = [];
-    
+
     if (place.street != null && place.street!.isNotEmpty) {
       parts.add(place.street!);
     }
@@ -152,30 +160,41 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
   }
 
   void _onCameraMove(CameraPosition position) {
-    setState(() {
-      _currentCameraPosition = position;
-      _currentPosition = position.target;
-      _isDragging = true;
-    });
-    
-    // Animate pin up when dragging starts
-    if (!_pinAnimationController.isAnimating && _pinAnimationController.value == 0) {
-      _pinAnimationController.forward();
+    // Update position without setState to avoid rebuilds during drag
+    _currentPosition = position.target;
+
+    // Only animate pin up once when dragging starts
+    if (!_isDragging) {
+      if (mounted) {
+        setState(() {
+          _isDragging = true;
+        });
+      }
+      if (!_pinAnimationController.isAnimating && _pinAnimationController.value == 0) {
+        _pinAnimationController.forward();
+      }
     }
   }
 
   void _onCameraIdle() {
-    setState(() {
-      _isDragging = false;
-    });
-    
+    if (mounted) {
+      setState(() {
+        _isDragging = false;
+      });
+    }
+
     // Animate pin down when dragging stops
     _pinAnimationController.reverse();
-    
-    // Get address for the new position and mark as selected
-    if (_currentPosition != null) {
-      _getAddressFromLatLng(_currentPosition!);
-    }
+
+    // Cancel any pending address lookup
+    _debounceTimer?.cancel();
+
+    // Debounce address lookup to avoid excessive API calls
+    _debounceTimer = Timer(_debounceDuration, () {
+      if (_currentPosition != null && mounted) {
+        _getAddressFromLatLng(_currentPosition!);
+      }
+    });
   }
 
   void _onMyLocationPressed() {
@@ -216,14 +235,19 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
       onCameraIdle: _onCameraIdle,
       scrollGesturesEnabled: true,
       zoomGesturesEnabled: true,
-      tiltGesturesEnabled: true,
-      rotateGesturesEnabled: true,
+      tiltGesturesEnabled: false, // Disable tilt for better performance
+      rotateGesturesEnabled: false, // Disable rotation for better performance
       myLocationEnabled: true,
       myLocationButtonEnabled: false,
       zoomControlsEnabled: false,
       mapToolbarEnabled: false,
-      minMaxZoomPreference: const MinMaxZoomPreference(1, 20),
+      minMaxZoomPreference: const MinMaxZoomPreference(10, 20), // Limit zoom range
       cameraTargetBounds: CameraTargetBounds.unbounded,
+      compassEnabled: false,
+      buildingsEnabled: true,
+      indoorViewEnabled: false,
+      trafficEnabled: false,
+      liteModeEnabled: false, // Use full rendering for smoother experience
     );
   }
 
@@ -285,42 +309,42 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
           Expanded(
             child: _isLoadingAddress
                 ? Row(
-                    children: [
-                      SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: const Color(0xFFFF5A3D),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Getting address...',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.black54,
-                        ),
-                      ),
-                    ],
-                  )
-                : Text(
-                    _address,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: Colors.black87,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: const Color(0xFFFF5A3D),
                   ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Getting address...',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.black54,
+                  ),
+                ),
+              ],
+            )
+                : Text(
+              _address,
+              style: const TextStyle(
+                fontSize: 14,
+                color: Colors.black87,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
     );
   }
 
-  // NEW: Build delivery information section
+  /*
   Widget _buildDeliveryInformation() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -334,49 +358,49 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
         children: [
           Row(
             children: [
-              Icon(
-                Icons.local_shipping,
-                color: Colors.green[700],
-                size: 20,
-              ),
+              // Icon(
+              //   Icons.local_shipping,
+              //   color: Colors.green[700],
+              //   size: 20,
+              // ),
               const SizedBox(width: 8),
-              Text(
-                'Delivery Information',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.green[700],
-                ),
-              ),
+              // Text(
+              //   'Delivery Information',
+              //   style: TextStyle(
+              //     fontSize: 16,
+              //     fontWeight: FontWeight.w600,
+              //     color: Colors.green[700],
+              //   ),
+              // ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Delivery Fee: K0', // Your delivery information
-            style: const TextStyle(
-              fontSize: 14,
-              color: Colors.black87,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          // const SizedBox(height: 8),
+          // Text(
+          //   'Delivery Fee: K0',
+          //   style: const TextStyle(
+          //     fontSize: 14,
+          //     color: Colors.black87,
+          //     fontWeight: FontWeight.w500,
+          //   ),
+          // ),
           const SizedBox(height: 4),
-          Text(
-            'Estimated delivery: 30-45 min',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey[600],
-            ),
-          ),
+          // Text(
+          //   'Estimated delivery: 30-45 min',
+          //   style: TextStyle(
+          //     fontSize: 14,
+          //     color: Colors.grey[600],
+          //   ),
+          // ),
         ],
       ),
     );
-  }
+  }*/
 
   Widget _buildConfirmButton() {
-    final bool isButtonEnabled = 
+    final bool isButtonEnabled =
         _currentPosition != null && !_isLoadingAddress && _hasSelectedLocation;
-    final Color buttonColor = 
-        isButtonEnabled ? const Color(0xFFFF5A3D) : Colors.grey;
+    final Color buttonColor =
+    isButtonEnabled ? const Color(0xFFFF5A3D) : Colors.grey;
 
     return ElevatedButton.icon(
       onPressed: isButtonEnabled ? _onConfirmPressed : null,
@@ -458,19 +482,6 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
                   ),
                 ),
                 _buildPinWidget(),
-                if (_isDragging)
-                  IgnorePointer(
-                    child: Center(
-                      child: Container(
-                        width: 2,
-                        height: 2,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFFF5A3D),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
@@ -499,13 +510,13 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
                 children: [
                   // Address display
                   _buildAddressSection(),
-                  
-                  // NEW: Conditionally show delivery information
-                  if (_hasSelectedLocation && !_isLoadingAddress) ...[
-                    const SizedBox(height: 16),
-                    _buildDeliveryInformation(),
-                  ],
-                  
+
+                  // Conditionally show delivery information
+                  // if (_hasSelectedLocation && !_isLoadingAddress) ...[
+                  //   const SizedBox(height: 16),
+                  //   _buildDeliveryInformation(),
+                  // ],
+
                   const SizedBox(height: 16),
                   // Confirm button
                   _buildConfirmButton(),

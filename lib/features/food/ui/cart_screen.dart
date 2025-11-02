@@ -13,7 +13,6 @@ import 'package:ubwinza_users/features/food/state/cart_provider.dart';
 import 'package:ubwinza_users/features/order/data/order_service.dart';
 import 'package:ubwinza_users/shared/widgets/delivery_location_sheet.dart';
 
-// If SellerInfo is declared elsewhere, ensure it’s available via your imports.
 class CartScreen extends StatefulWidget {
   const CartScreen({super.key});
 
@@ -29,13 +28,9 @@ class _CartScreenState extends State<CartScreen> {
     final cartProvider = context.watch<CartProvider>();
     final deliveryProvider = context.watch<DeliveryProvider>();
 
-    // Keep uniqueKey by working with map entries
     final cartEntries = cartProvider.items.entries.toList();
-
-    // Unique seller IDs from items (assuming sellerId is on Food)
     final sellerIds = cartEntries.map((e) => e.value.food.sellerId).toSet().toList();
 
-    // Totals
     final subtotal = cartProvider.subTotal;
     final totalDeliveryFee = deliveryProvider.getTotalDeliveryFee(sellerIds);
     final grandTotal = subtotal + totalDeliveryFee;
@@ -60,33 +55,33 @@ class _CartScreenState extends State<CartScreen> {
         child: Column(
           children: [
             if (cartEntries.isNotEmpty) _buildDeliveryLocationCard(deliveryProvider),
-        
+
             Expanded(
               child: cartEntries.isEmpty
                   ? _buildEmptyCart()
                   : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: cartEntries.length,
-                      itemBuilder: (context, index) {
-                        final entry = cartEntries[index];
-                        final uniqueKey = entry.key;
-                        final item = entry.value;
-        
-                        final sellerInfo = deliveryProvider.getSellerInfo(item.food.sellerId);
-                        final deliveryCalculation =
-                            deliveryProvider.getDeliveryCalculation(item.food.sellerId);
-        
-                        return _buildCartItem(
-                          uniqueKey: uniqueKey,
-                          item: item,
-                          sellerInfo: sellerInfo,
-                          deliveryCalculation: deliveryCalculation,
-                          cartProvider: cartProvider,
-                        );
-                      },
-                    ),
+                padding: const EdgeInsets.all(16),
+                itemCount: cartEntries.length,
+                itemBuilder: (context, index) {
+                  final entry = cartEntries[index];
+                  final uniqueKey = entry.key;
+                  final item = entry.value;
+
+                  final sellerInfo = deliveryProvider.getSellerInfo(item.food.sellerId);
+                  final deliveryCalculation =
+                  deliveryProvider.getDeliveryCalculation(item.food.sellerId);
+
+                  return _buildCartItem(
+                    uniqueKey: uniqueKey,
+                    item: item,
+                    sellerInfo: sellerInfo,
+                    deliveryCalculation: deliveryCalculation,
+                    cartProvider: cartProvider,
+                  );
+                },
+              ),
             ),
-        
+
             if (cartEntries.isNotEmpty)
               _buildCheckoutSection(
                 subtotal: subtotal,
@@ -116,7 +111,7 @@ class _CartScreenState extends State<CartScreen> {
           hasLocation ? 'Delivery Location Set' : 'Set Delivery Location',
           style: TextStyle(
             fontWeight: FontWeight.w600,
-            color: hasLocation ? Colors.green : Colors.black87,
+            color: hasLocation ? Colors.green : Colors.white,
           ),
         ),
         subtitle: Text(
@@ -124,7 +119,7 @@ class _CartScreenState extends State<CartScreen> {
               ? 'Tap to change delivery location'
               : 'Required for delivery fee calculation',
           style: TextStyle(
-            color: hasLocation ? Colors.green[700] : Colors.grey[600],
+            color: hasLocation ? Colors.green[700] : Colors.white,
           ),
         ),
         trailing: Icon(
@@ -180,134 +175,269 @@ class _CartScreenState extends State<CartScreen> {
   }) {
     final Food food = item.food;
 
-    return Card(
-      color: const Color(0xFF1A2B7B),
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
+    return Dismissible(
+      key: Key(uniqueKey),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: Colors.red,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Image
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                food.imageUrl,
-                width: 60,
-                height: 60,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Container(
-                  width: 60,
-                  height: 60,
-                  color: Colors.grey[200],
-                  child: const Icon(Icons.fastfood, color: Colors.grey),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-
-            // Details
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Name
-                  Text(
-                    food.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-
-                  // Seller
-                  if (sellerInfo != null)
-                    Row(
-                      children: [
-                        Icon(Icons.store, size: 14, color: Colors.grey[600]),
-                        const SizedBox(width: 4),
-                        Text(
-                          sellerInfo.name,
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                        ),
-                      ],
-                    ),
-
-                  // Delivery info (per-seller)
-                  if (deliveryCalculation != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Row(
-                        children: [
-                          Icon(Icons.local_shipping, size: 14, color: Colors.green[600]),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${deliveryCalculation.distanceInKm.toStringAsFixed(1)}km • K${deliveryCalculation.deliveryFee.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.green[700],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  const SizedBox(height: 8),
-
-                  // Price & quantity controls
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // item.total is what your provider sums for overall total
-                      Text(
-                        'K${item.total.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFFFF5A3D),
-                        ),
-                      ),
-                      Row(
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.remove_circle_outline, size: 20),
-                            onPressed: () {
-                              if (item.quantity > 1) {
-                                cartProvider.decrement(uniqueKey);
-                              } else {
-                                cartProvider.remove(uniqueKey);
-                              }
-                            },
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey[300]!),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(
-                              item.quantity.toString(),
-                              style: const TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.add_circle_outline, size: 20),
-                            onPressed: () => cartProvider.increment(uniqueKey),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
+            Icon(Icons.delete, color: Colors.white, size: 32),
+            SizedBox(height: 4),
+            Text(
+              'Delete',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ],
         ),
+      ),
+      confirmDismiss: (direction) async {
+        return await _showDeleteConfirmation(context, food.name);
+      },
+      onDismissed: (direction) {
+        cartProvider.remove(uniqueKey);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${food.name} removed from cart'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+            action: SnackBarAction(
+              label: 'UNDO',
+              textColor: Colors.white,
+              onPressed: () {
+                // Add back to cart with same details
+                cartProvider.add(
+                  food,
+                  size: item.size,
+                  variation: item.selectedVariation,
+                  addons: item.selectedAddons,
+                  totalPrice: item.total / item.quantity,
+                  qty: item.quantity,
+                );
+              },
+            ),
+          ),
+        );
+      },
+      child: Card(
+        color: const Color(0xFF1A2B7B),
+        margin: const EdgeInsets.only(bottom: 12),
+        elevation: 2,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              // Image
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  food.imageUrl,
+                  width: 60,
+                  height: 60,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => Container(
+                    width: 60,
+                    height: 60,
+                    color: Colors.grey[200],
+                    child: const Icon(Icons.fastfood, color: Colors.grey),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+
+              // Details
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Name
+                    Text(
+                      food.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+
+                    // Seller
+                    if (sellerInfo != null)
+                      Row(
+                        children: [
+                          Icon(Icons.store, size: 14, color: Colors.grey[300]),
+                          const SizedBox(width: 4),
+                          Text(
+                            sellerInfo.name,
+                            style: TextStyle(fontSize: 12, color: Colors.grey[300]),
+                          ),
+                        ],
+                      ),
+
+                    // Delivery info (per-seller)
+                    if (deliveryCalculation != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Row(
+                          children: [
+                            Icon(Icons.local_shipping, size: 14, color: Colors.green[300]),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${deliveryCalculation.distanceInKm.toStringAsFixed(1)}km • K${deliveryCalculation.deliveryFee.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.green[300],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    const SizedBox(height: 8),
+
+                    // Price & quantity controls
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            'K${item.total.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFFFF5A3D),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            InkWell(
+                              onTap: () {
+                                if (item.quantity > 1) {
+                                  cartProvider.decrement(uniqueKey);
+                                } else {
+                                  _showDeleteConfirmation(context, food.name).then((confirm) {
+                                    if (confirm == true) {
+                                      cartProvider.remove(uniqueKey);
+                                    }
+                                  });
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                child: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 20,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey[300]!),
+                                borderRadius: BorderRadius.circular(4),
+                                color: Colors.white,
+                              ),
+                              child: Text(
+                                item.quantity.toString(),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                  color: Colors.black,
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () => cartProvider.increment(uniqueKey),
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                child: const Icon(
+                                  Icons.add_circle_outline,
+                                  size: 20,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                            InkWell(
+                              onTap: () async {
+                                final confirm = await _showDeleteConfirmation(context, food.name);
+                                if (confirm == true) {
+                                  cartProvider.remove(uniqueKey);
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('${food.name} removed from cart'),
+                                        backgroundColor: Colors.green,
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                child: const Icon(
+                                  Icons.delete_outline,
+                                  size: 20,
+                                  color: Colors.red,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<bool?> _showDeleteConfirmation(BuildContext context, String itemName) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1A2B7B),
+        title: const Text(
+          'Remove Item',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'Remove $itemName from cart?',
+          style: const TextStyle(color: Colors.white),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white)),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
       ),
     );
   }
@@ -322,7 +452,7 @@ class _CartScreenState extends State<CartScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Colors.grey[400],
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.1),
@@ -381,17 +511,17 @@ class _CartScreenState extends State<CartScreen> {
               ),
               child: _isLoading
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
                   : const Text(
-                      'Place Order',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                'Place Order',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ),
           ),
         ],
@@ -410,7 +540,7 @@ class _CartScreenState extends State<CartScreen> {
             style: TextStyle(
               fontSize: isTotal ? 16 : 14,
               fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
-              color: isTotal ? Colors.black : Colors.grey[600],
+              color: isTotal ? Colors.black : Colors.black,
             ),
           ),
           Text(
@@ -418,14 +548,14 @@ class _CartScreenState extends State<CartScreen> {
             style: TextStyle(
               fontSize: isTotal ? 18 : 14,
               fontWeight: isTotal ? FontWeight.bold : FontWeight.w600,
-              color: isTotal ? const Color(0xFFFF5A3D) : Colors.grey[600],
+              color: isTotal ? const Color(0xFFFF5A3D) : Colors.black,
             ),
           ),
         ],
       ),
     );
   }
-  
+
 
   Future<void> _showDeliveryLocationSheet(DeliveryProvider deliveryProvider) async {
     final result = await showDeliveryLocationSheet(
@@ -433,194 +563,148 @@ class _CartScreenState extends State<CartScreen> {
       initialTarget: deliveryProvider.deliveryLocation,
     );
 
+    if (result != null) {
+      await deliveryProvider.setDeliveryLocation(result.latLng);
 
-if (result != null) {
-  // Save the location
-  await deliveryProvider.setDeliveryLocation(result.latLng);
+      final dm = PrefsService.I.getDeliveryMethod();
+      final rideType = (dm == DeliveryMethod.bicycle) ? 'bicycle' : 'motorbike';
 
-  // Figure out the current ride type from prefs
-  final dm = PrefsService.I.getDeliveryMethod();
-  final rideType = (dm == DeliveryMethod.bicycle) ? 'bicycle' : 'motorbike';
+      final sellerIds = context.read<CartProvider>().items.values
+          .map((e) => e.food.sellerId)
+          .toSet()
+          .toList();
 
-  // Recalculate only for sellers in the cart
-  final sellerIds = context.read<CartProvider>().items.values
-      .map((e) => e.food.sellerId)
-      .toSet()
-      .toList();
+      await deliveryProvider.recalculateForSellers(sellerIds, rideType: rideType);
 
-  await deliveryProvider.recalculateForSellers(sellerIds, rideType: rideType);
-
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text('Delivery location updated!'),
-      backgroundColor: Colors.green,
-    ),
-  );
-}
-
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Delivery location updated!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
   }
 
   Future<void> _proceedToCheckout(
-  DeliveryProvider deliveryProvider,
-  CartProvider cartProvider,
-) async {
-  if (deliveryProvider.deliveryLocation == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Please set a delivery location first'),
-        backgroundColor: Colors.orange,
-      ),
-    );
-    return;
-  }
-
-  setState(() => _isLoading = true);
-
-  try {
-    final userId = FirebaseAuth.instance.currentUser?.uid;
-    if (userId == null) {
-      throw 'Not signed in';
-    }
-
-    // determine ride type from your saved preference
-    final dm = PrefsService.I.getDeliveryMethod();
-    final rideType = (dm == DeliveryMethod.bicycle) ? 'bicycle' : 'motorbike';
-
-    // group items by seller
-    final entries = cartProvider.items.entries.toList();
-    final Map<String, List<CartItem>> itemsBySeller = {};
-    for (final e in entries) {
-      final sellerId = e.value.food.sellerId;
-      itemsBySeller.putIfAbsent(sellerId, () => []).add(e.value);
-    }
-
-    // ensure we have delivery calcs for all sellers
-    final sellerIds = itemsBySeller.keys.toList();
-    await deliveryProvider.recalculateForSellers(sellerIds, rideType: rideType);
-
-    // create one order per seller
-    final createdOrderIds = <String>[];
-    final orderSvc = OrderService();
-
-    for (final sellerId in sellerIds) {
-      final calc = deliveryProvider.getDeliveryCalculation(sellerId);
-      if (calc == null) {
-        throw 'Missing delivery fee for seller $sellerId';
-      }
-      final orderId = await orderSvc.createOrder(
-        userId: userId,
-        sellerId: sellerId,
-        items: itemsBySeller[sellerId]!,
-        delivery: calc,
-        dropoff: deliveryProvider.deliveryLocation!,
-        rideType: rideType,
+      DeliveryProvider deliveryProvider,
+      CartProvider cartProvider,
+      ) async {
+    if (deliveryProvider.deliveryLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please set a delivery location first'),
+          backgroundColor: Colors.orange,
+        ),
       );
-      createdOrderIds.add(orderId);
+      return;
     }
 
-    // success UI
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.green),
-            SizedBox(width: 8),
-            Text('Order Placed!'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Orders created: ${createdOrderIds.length}'),
-            const SizedBox(height: 8),
-            Text('IDs:\n${createdOrderIds.join('\n')}'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              cartProvider.clear();
-              deliveryProvider.clear();
-              Navigator.pop(context); // dialog
-              Navigator.pop(context); // back to previous screen
-            },
-            child: const Text('Continue Shopping'),
+    setState(() => _isLoading = true);
+
+    try {
+      final userId = FirebaseAuth.instance.currentUser?.uid;
+      if (userId == null) {
+        throw 'Not signed in';
+      }
+
+      final dm = PrefsService.I.getDeliveryMethod();
+      final rideType = (dm == DeliveryMethod.bicycle) ? 'bicycle' : 'motorbike';
+
+      final entries = cartProvider.items.entries.toList();
+      final Map<String, List<CartItem>> itemsBySeller = {};
+      for (final e in entries) {
+        final sellerId = e.value.food.sellerId;
+        itemsBySeller.putIfAbsent(sellerId, () => []).add(e.value);
+      }
+
+      final sellerIds = itemsBySeller.keys.toList();
+      await deliveryProvider.recalculateForSellers(sellerIds, rideType: rideType);
+
+      final createdOrderIds = <String>[];
+      final orderSvc = OrderService();
+
+      for (final sellerId in sellerIds) {
+        final calc = deliveryProvider.getDeliveryCalculation(sellerId);
+        if (calc == null) {
+          throw 'Missing delivery fee for seller $sellerId';
+        }
+        final orderId = await orderSvc.createOrder(
+          userId: userId,
+          sellerId: sellerId,
+          items: itemsBySeller[sellerId]!,
+          delivery: calc,
+          dropoff: deliveryProvider.deliveryLocation!,
+          rideType: rideType,
+        );
+        createdOrderIds.add(orderId);
+      }
+
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF1A2B7B),
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green),
+              SizedBox(width: 8),
+              Text('Order Placed!', style: TextStyle(color: Colors.white)),
+            ],
           ),
-        ],
-      ),
-    );
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Checkout failed: $e'), backgroundColor: Colors.red),
-    );
-  } finally {
-    if (mounted) setState(() => _isLoading = false);
-  }
-}
-
-
-  Future<void> _showCheckoutSuccessDialog(
-    CartProvider cartProvider,
-    DeliveryProvider deliveryProvider,
-  ) async {
-    final entries = cartProvider.items.entries.toList();
-    final sellerIds = entries.map((e) => e.value.food.sellerId).toSet().toList();
-    final total = cartProvider.subTotal + deliveryProvider.getTotalDeliveryFee(sellerIds);
-
-    await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.green),
-            SizedBox(width: 8),
-            Text('Order Placed!'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Total: K${total.toStringAsFixed(2)}'),
-            const SizedBox(height: 8),
-            Text('Items: ${entries.length}'),
-            const SizedBox(height: 8),
-            const Text('Delivery fee calculated based on distance'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              cartProvider.clear();
-              deliveryProvider.clear();
-              Navigator.pop(context); // Close dialog
-              Navigator.pop(context); // Back to previous screen
-            },
-            child: const Text('Continue Shopping'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Orders created: ${createdOrderIds.length}',
+                style: const TextStyle(color: Colors.white),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'IDs:\n${createdOrderIds.join('\n')}',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
+          actions: [
+            TextButton(
+              onPressed: () {
+                cartProvider.clear();
+                deliveryProvider.clear();
+                Navigator.pop(context);
+                Navigator.pop(context);
+              },
+              child: const Text('Continue Shopping', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Checkout failed: $e'), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _showClearCartDialog(
-    BuildContext context,
-    CartProvider cartProvider,
-  ) async {
+      BuildContext context,
+      CartProvider cartProvider,
+      ) async {
     await showDialog(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A2B7B),
-        title: const Text('Clear Cart'),
-        content: const Text('Are you sure you want to remove all items from your cart?'),
+        title: const Text('Clear Cart', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Are you sure you want to remove all items from your cart?',
+          style: TextStyle(color: Colors.white),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white)),
           ),
           TextButton(
             style: TextButton.styleFrom(foregroundColor: Colors.red),

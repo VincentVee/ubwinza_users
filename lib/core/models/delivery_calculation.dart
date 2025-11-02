@@ -10,6 +10,8 @@ class DeliveryCalculation {
   final LatLng sellerLocation;
   final String rideType;
   final double pricePerKilometer;
+  final bool isRealDistance; // New field to indicate if real distance was used
+
 
   DeliveryCalculation({
     required this.distanceInKm,
@@ -19,6 +21,7 @@ class DeliveryCalculation {
     required this.sellerLocation,
     required this.rideType,
     required this.pricePerKilometer,
+    this.isRealDistance = true,
   });
 
   @override

@@ -146,4 +146,6 @@ class CartItem {
   String get name => displayName;  // Use the display name that includes customizations
   double get price => unitPrice;  // Use the calculated unit price
   String get sellerId => food.sellerId;
+
+  String? get size => null;
 }

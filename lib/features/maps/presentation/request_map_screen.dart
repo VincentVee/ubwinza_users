@@ -388,7 +388,7 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
             Positioned(
               left: 12,
               right: 12,
-              bottom: 16,
+              bottom:90,
               child: _DriverInfoCard(
                 driver: _selectedDriver!,
                 from: widget.pickupLatLng,
@@ -401,7 +401,7 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
             Positioned(
               left: 12,
               right: 12,
-              bottom: 16,
+              bottom: 0,
               child: Material(
                 color: Colors.red.withOpacity(.92),
                 borderRadius: BorderRadius.circular(10),
@@ -418,9 +418,10 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
             // 🔴 Cancel button — only show when still finding drivers
 if (_request?.status == 'pending' || _request?.status == 'searching')
   Positioned(
-    bottom: MediaQuery.of(context).padding.bottom + 24,
+    bottom: MediaQuery.of(context).padding.bottom + 0,
     left: 20,
     right: 20,
+
     child: SafeArea(
       child: ElevatedButton.icon(
         style: ElevatedButton.styleFrom(
@@ -542,6 +543,7 @@ class _DriverInfoCard extends StatelessWidget {
     final dist = _km(from, LatLng(driver.latitude, driver.longitude));
     return SafeArea(
       child: Card(
+        color: const Color(0xFF1A2B7B),
         elevation: 10,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         child: Padding(
@@ -568,7 +570,7 @@ class _DriverInfoCard extends StatelessWidget {
                                 fontWeight: FontWeight.bold, fontSize: 16)),
                         Text(
                           '${vehicleType[0].toUpperCase()}${vehicleType.substring(1)} • ${driver.rating} ★',
-                          style: TextStyle(color: Colors.grey[700]),
+                          style: TextStyle(color: Colors.yellow),
                         ),
                         const SizedBox(height: 4),
                         Text(
