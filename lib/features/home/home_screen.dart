@@ -9,6 +9,7 @@ import 'package:ubwinza_users/features/order/data/presentation/order_tracking_vi
 import '../../core/models/current_location.dart';
 import '../../core/models/delivery_method.dart';
 import '../../core/services/pref_service.dart';
+import '../delivery/presentation/deliveries_list_screen.dart';
 import '../maps/nearby_drivers_view_model.dart';
 import 'widgets/drivers_map.dart';
 import 'widgets/hero_header.dart';
@@ -94,7 +95,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
         ),
       );
     } else if (_selectedIndex == 1) {
-      return const DeliveriesTrackingView();
+      return const DeliveriesListScreen();
     } else if (_selectedIndex == 2) {
       return const OrdersTrackingView();
     } else {

@@ -1,8 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/request_model.dart';
+import 'fare_service.dart';
 
 class RequestService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FareService _fareService = FareService();
+
 
   // Create new ride request
   Future<String> createRideRequest(RideRequest request) async {
@@ -102,26 +105,9 @@ class RequestService {
   }
 
   // Calculate estimated fare (simple distance-based calculation)
-  double calculateEstimatedFare(double distanceInKm, String vehicleType) {
-    const baseFare = 5.0; // Base fare in Zambian Kwacha
-    const perKmRate = 2.0; // Per km rate
-
-    double multiplier = 1.0;
-    switch (vehicleType) {
-      case 'bicycle':
-        multiplier = 0.7;
-        break;
-      case 'motorbike':
-        multiplier = 1.0;
-        break;
-      case 'car':
-        multiplier = 1.5;
-        break;
-      case 'truck':
-        multiplier = 2.0;
-        break;
-    }
-
-    return (baseFare + (distanceInKm * perKmRate)) * multiplier;
+  Future<double> calculateEstimatedFare(double distance, String vehicleType) async {
+    final baseFare = await _fareService.getBaseFare(vehicleType);
+    final pricePerKm = await _fareService.getPricePerKm(vehicleType);
+    return baseFare + (distance * pricePerKm);
   }
 }

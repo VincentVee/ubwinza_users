@@ -197,6 +197,7 @@ class AuthViewModel {
       await sharedPreferences!.setString("imageUrl", userModel.imageUrl);
       await sharedPreferences!.setString("status", userModel.status);
       await sharedPreferences!.setStringList("userCart", userModel.userCart);
+      await sharedPreferences!.setString("phone", userModel.phone??'');
 
       _log('✅ SharedPreferences updated');
 
@@ -321,6 +322,7 @@ class AuthViewModel {
           await sharedPreferences!.setString("name", userModel.name);
           await sharedPreferences!.setString("imageUrl", userModel.imageUrl);
           await sharedPreferences!.setString("status", userModel.status);
+          await sharedPreferences!.setString("phone", userModel.phone??'');
           await sharedPreferences!.setStringList("userCart", userModel.userCart);
 
           _log('✅ SharedPreferences updated successfully');

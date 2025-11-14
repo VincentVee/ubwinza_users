@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -40,6 +41,7 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
   List<LatLng> _routePoints = const [];
   String? _distanceText; // e.g. "8.3 km"
   String? _durationText; // e.g. "16 mins"
+  double _currentDistanceKm = 0.0;
 
   bool _fragile = false;
   DeliveryMethod _method = DeliveryMethod.motorbike;
@@ -95,7 +97,7 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
         polylineId: const PolylineId('route'),
         points: _routePoints,
         width: 6,
-        color: Colors.green, // nice green route
+        color: Colors.green,
         endCap: Cap.roundCap,
         startCap: Cap.roundCap,
         jointType: JointType.round,
@@ -110,6 +112,7 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
         _routePoints = const [];
         _distanceText = null;
         _durationText = null;
+        _currentDistanceKm = 0.0;
       });
       return;
     }
@@ -123,6 +126,7 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
         _routePoints = res.points;
         _distanceText = res.distanceText;
         _durationText = res.durationText;
+        _currentDistanceKm = _extractDistanceFromText(res.distanceText ?? '0 km');
       });
 
       // Fit the camera to the route
@@ -138,9 +142,44 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
         _routePoints = [_pickup!, _dest!];
         _distanceText = null;
         _durationText = null;
+        _currentDistanceKm = _calculateHaversineDistance(_pickup!, _dest!);
       });
     }
   }
+
+  double _extractDistanceFromText(String distanceText) {
+    try {
+      final regex = RegExp(r'([\d.]+)');
+      final match = regex.firstMatch(distanceText);
+      if (match != null) {
+        double value = double.parse(match.group(1)!);
+
+        if (distanceText.contains('mi')) {
+          value *= 1.60934;
+        } else if (distanceText.contains('m') && !distanceText.contains('km')) {
+          value /= 1000;
+        }
+
+        return value;
+      }
+    } catch (e) {
+      print('Error parsing distance text: $e');
+    }
+    return 0.0;
+  }
+
+  double _calculateHaversineDistance(LatLng a, LatLng b) {
+    const R = 6371.0;
+    final dLat = _deg2rad(b.latitude - a.latitude);
+    final dLng = _deg2rad(b.longitude - a.longitude);
+    final la1 = _deg2rad(a.latitude);
+    final la2 = _deg2rad(b.latitude);
+    final h = sin(dLat / 2) * sin(dLat / 2) +
+        cos(la1) * cos(la2) * sin(dLng / 2) * sin(dLng / 2);
+    return R * 2 * atan2(sqrt(h), sqrt(1 - h));
+  }
+
+  double _deg2rad(double deg) => deg * (pi / 180);
 
   LatLngBounds _boundsFromLatLngList(List<LatLng> list) {
     double? x0, x1, y0, y1;
@@ -178,7 +217,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
   }
 
   Future<void> _pickOnMap({required bool forPickup}) async {
-    // Clear the corresponding text when opening (as requested)
     setState(() {
       if (forPickup) {
         _pickupCtrl.clear();
@@ -249,7 +287,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
 
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
-    // Auto-expand the sheet when keyboard opens (typing in any field)
     if (bottomInset > 0 && _lastInset == 0 && _sheetCtrl.isAttached) {
       _sheetCtrl.animateTo(
         0.72,
@@ -268,7 +305,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
       extendBody: true,
       body: Stack(
         children: [
-          // Map
           GoogleMap(
             initialCameraPosition: CameraPosition(target: _me!, zoom: 13.5),
             onMapCreated: (c) => _map = c,
@@ -280,7 +316,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
             zoomControlsEnabled: false,
           ),
 
-          // Distance chip (shows when we have a route)
           if (_distanceText != null || _durationText != null)
             SafeArea(
               child: Align(
@@ -316,7 +351,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
               ),
             ),
 
-          // Draggable full-width bottom modal
           DraggableScrollableSheet(
             controller: _sheetCtrl,
             initialChildSize: 0.34,
@@ -347,7 +381,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Drag handle
                         Center(
                           child: Container(
                             width: 42,
@@ -360,7 +393,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                           ),
                         ),
 
-                        // === Pickup
                         _FieldTheme(
                           child: PlaceAutocompleteField(
                             controller: _pickupCtrl,
@@ -379,7 +411,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                         ),
                         const SizedBox(height: 14),
 
-                        // === Destination
                         _FieldTheme(
                           child: PlaceAutocompleteField(
                             controller: _destCtrl,
@@ -398,7 +429,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                         ),
                         const SizedBox(height: 14),
 
-                        // === Package name + Fragile
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
@@ -420,7 +450,6 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // === Current method (tap to change)
                         const Text(
                           'Current delivery method (tap to change)',
                           style: TextStyle(
@@ -466,23 +495,22 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                         ),
                         const SizedBox(height: 16),
 
-                        // === Continue
-
-                    SizedBox(
+                        SizedBox(
                           width: double.infinity,
                           child: ElevatedButton(
                             onPressed: _canContinue
                                 ? () {
                               showPackageRequestModal(
                                 context: context,
+                                places: _places,
                                 pickupAddress: _pickupCtrl.text,
                                 pickupLatLng: _pickup!,
                                 destinationAddress: _destCtrl.text,
                                 destinationLatLng: _dest!,
                                 fragile: _fragile,
                                 packageName: _pkgNameCtrl.text,
-                                deliveryMethod:
-                                _method == DeliveryMethod.motorbike ? 'Motorbike' : 'Bicycle', places: _places,
+                                deliveryMethod: _method == DeliveryMethod.motorbike ? 'Motorbike' : 'Bicycle',
+                                initialDistanceKm: _currentDistanceKm,
                               );
                             }
                                 : null,
@@ -549,11 +577,9 @@ Future<_DirectionsResult> _fetchDirections({
     throw Exception('No route');
   }
 
-  // Decode overview polyline
   final overview = routes.first['overview_polyline']?['points'] as String?;
   final points = overview == null ? <LatLng>[] : _decodePolyline(overview);
 
-  // Distance & duration from first leg (if available)
   String? distanceText;
   String? durationText;
   final legs = routes.first['legs'] as List?;
@@ -570,7 +596,6 @@ Future<_DirectionsResult> _fetchDirections({
   );
 }
 
-/// Standard Google encoded polyline decoder.
 List<LatLng> _decodePolyline(String encoded) {
   List<LatLng> poly = [];
   int index = 0, len = encoded.length;
@@ -603,8 +628,6 @@ List<LatLng> _decodePolyline(String encoded) {
 
 // ---------- Small, focused widgets ----------
 
-/// Wraps children so any popup/dropdown (e.g., TypeAhead inside PlaceAutocompleteField)
-/// uses a white card with dark text without touching your global theme.
 class _FieldTheme extends StatelessWidget {
   const _FieldTheme({required this.child});
   final Widget child;
