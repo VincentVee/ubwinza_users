@@ -23,6 +23,8 @@ class RideRequest {
   final String? driverVehicleType;
   final String? driverVehicleModel;
   final String? driverLicensePlate;
+  final double? driverLat;
+  final double? driverLog;
   final DateTime createdAt;
   final DateTime? acceptedAt;
   final DateTime? startedAt;
@@ -51,6 +53,8 @@ class RideRequest {
     this.driverVehicleType,
     this.driverVehicleModel,
     this.driverLicensePlate,
+    this.driverLat,
+    this.driverLog,
     required this.createdAt,
     this.acceptedAt,
     this.startedAt,
@@ -82,6 +86,8 @@ class RideRequest {
       driverVehicleType: data['driverVehicleType'],
       driverVehicleModel: data['driverVehicleModel'],
       driverLicensePlate: data['driverLicensePlate'],
+      driverLat: data['driverLat'],
+      driverLog: data['driverLog'],
       createdAt: (data['createdAt'] as Timestamp).toDate(),
       acceptedAt: data['acceptedAt'] != null
           ? (data['acceptedAt'] as Timestamp).toDate()
@@ -118,6 +124,8 @@ class RideRequest {
       'driverVehicleType': driverVehicleType,
       'driverVehicleModel': driverVehicleModel,
       'driverLicensePlate': driverLicensePlate,
+      'driverLat': driverLat,
+      'driverLog': driverLog,
       'createdAt': Timestamp.fromDate(createdAt),
       'acceptedAt': acceptedAt != null ? Timestamp.fromDate(acceptedAt!) : null,
       'startedAt': startedAt != null ? Timestamp.fromDate(startedAt!) : null,

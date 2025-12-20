@@ -10,6 +10,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:ubwinza_users/global/global_vars.dart';
 
+// Assuming 'googleApiKey' is defined in global_vars.dart
 String kGoogleApiKey = googleApiKey;
 
 class EnhancedDeliveryTrackingView extends StatefulWidget {
@@ -64,8 +65,8 @@ class _EnhancedDeliveryTrackingViewState
           'searching',
           'accepted',
           'driver_on_pickup',
-          'driver_on_delivery',
-          'in_progress'
+          'heading_to_destination',
+          'in-progress',
         ]).snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -165,6 +166,19 @@ class _DeliveryMapTracker extends StatefulWidget {
   State<_DeliveryMapTracker> createState() => _DeliveryMapTrackerState();
 }
 
+// Helper class for Directions API result
+class _RouteResult {
+  final List<LatLng> points;
+  final String? distanceText;
+  final String? durationText;
+
+  _RouteResult({
+    required this.points,
+    this.distanceText,
+    this.durationText,
+  });
+}
+
 class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
   GoogleMapController? _mapController;
   final Set<Marker> _markers = {};
@@ -180,11 +194,13 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
   BitmapDescriptor? _assignedDriverIcon;
   BitmapDescriptor? _defaultDriverIcon;
 
+  LatLng? _lastDriverLocation;
+
   List<Map<String, dynamic>> _availableDrivers = [];
 
   String? _mainRouteDistance;
   String? _mainRouteDuration;
-  String? _debugMessage = '';
+  // String? _debugMessage = ''; // Unused, commented out
 
   // Loading states
   bool _isLoadingMap = true;
@@ -194,7 +210,8 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
   // Map type toggle
   MapType _currentMapType = MapType.normal;
 
-  StreamSubscription<DocumentSnapshot>? _driverLocationSubscription;
+  // Removed _driverLocationSubscription as it is no longer needed
+  // StreamSubscription<DocumentSnapshot>? _driverLocationSubscription;
   StreamSubscription<DocumentSnapshot>? _requestUpdatesSubscription;
   StreamSubscription<QuerySnapshot>? _availableDriversSubscription;
 
@@ -210,9 +227,21 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
     _loadCustomIcons();
     _initializeMapData();
     _fetchMainRoute();
-    _listenToDriverLocation();
+    // Removed call to _listenToDriverLocation()
     _listenToRequestUpdates();
-    _listenToAvailableDrivers();
+
+    if (!(_currentStatus == 'accepted' || _currentStatus == 'in-progress' || _currentStatus == 'heading_to_destination')) {
+      _listenToAvailableDrivers();
+    }
+  }
+
+  @override
+  void dispose() {
+    // _driverLocationSubscription?.cancel(); // Cancelled as it's removed
+    _requestUpdatesSubscription?.cancel();
+    _availableDriversSubscription?.cancel();
+    _mapController?.dispose();
+    super.dispose();
   }
 
   Future<void> _loadCustomIcons() async {
@@ -220,12 +249,11 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       _defaultDriverIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue);
       _assignedDriverIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
 
-      _motorbikeIcon = await _createCustomIcon('images/bike.jpg', size: 180);
-      _bicycleIcon = await _createCustomIcon('images/bicycle.png', size: 390);
+      // NOTE: Ensure 'images/bike-delivery-icon.png' and 'images/bicycle.png' are in your assets folder and registered in pubspec.yaml
+      _motorbikeIcon = await _createCustomIcon('images/bike-delivery-icon.png', size: 128);
+      _bicycleIcon = await _createCustomIcon('images/bicycle.png', size: 128);
 
-      debugPrint('✅ Custom icons loaded successfully');
     } catch (e) {
-      debugPrint('⚠️ Failed to load custom icons: $e');
       _motorbikeIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue);
       _bicycleIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan);
       _assignedDriverIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
@@ -245,7 +273,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
           .asUint8List();
       return BitmapDescriptor.fromBytes(bytes);
     } catch (e) {
-      debugPrint('⚠️ Icon loading failed for $assetPath: $e');
       return BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue);
     }
   }
@@ -315,7 +342,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
           : MapType.normal;
     });
 
-    // Show feedback to user
     String mapTypeName = _currentMapType == MapType.normal
         ? 'Street View'
         : _currentMapType == MapType.satellite
@@ -383,6 +409,10 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
   void _listenToAvailableDrivers() {
     _availableDriversSubscription?.cancel();
 
+    if (_driverId != null && _driverId!.isNotEmpty) {
+      return;
+    }
+
     _availableDriversSubscription = FirebaseFirestore.instance
         .collection('riders')
         .where('vehicleType', isEqualTo: _vehicleType)
@@ -415,6 +445,13 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
   }
 
   void _updateAvailableDriverMarkers() {
+    if (_driverId != null && _driverId!.isNotEmpty) {
+      _markers.removeWhere((marker) => marker.markerId.value.startsWith('available_driver_'));
+      _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('connection_'));
+      if(mounted) setState(() {});
+      return;
+    }
+
     _markers.removeWhere((marker) => marker.markerId.value.startsWith('available_driver_'));
 
     for (final driver in _availableDrivers) {
@@ -452,6 +489,12 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
   }
 
   void _updateDriverConnectionLines() async {
+    if (_driverId != null && _driverId!.isNotEmpty) {
+      _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('connection_'));
+      if(mounted) setState(() {});
+      return;
+    }
+
     _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('connection_'));
 
     final pickupLat = widget.deliveryData['pickupLat'] as double?;
@@ -488,51 +531,72 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
     if (mounted) setState(() {});
   }
 
-  void _listenToDriverLocation() {
-    if (_driverId == null || _driverId!.isEmpty) return;
+  // Calculates the bearing (angle) between two LatLng points for marker rotation
+  double _calculateBearing(LatLng start, LatLng end) {
+    final startLat = start.latitude * (math.pi / 180);
+    final startLng = start.longitude * (math.pi / 180);
+    final endLat = end.latitude * (math.pi / 180);
+    final endLng = end.longitude * (math.pi / 180);
 
-    _driverLocationSubscription?.cancel();
+    final dLng = endLng - startLng;
 
-    _driverLocationSubscription = FirebaseFirestore.instance
-        .collection('riders')
-        .doc(_driverId)
-        .snapshots()
-        .listen((snapshot) {
-      if (snapshot.exists && mounted) {
-        final data = snapshot.data()!;
-        final lat = data['latitude'] as double?;
-        final lng = data['longitude'] as double?;
+    final y = math.sin(dLng) * math.cos(endLat);
+    final x = math.cos(startLat) * math.sin(endLat) -
+        math.sin(startLat) * math.cos(endLat) * math.cos(dLng);
 
-        if (lat != null && lng != null) {
-          setState(() {
-            _driverPosition = LatLng(lat, lng);
-            _updateAssignedDriverMarker();
-            _updateAssignedDriverRoute();
-          });
-        }
-      }
+    double bearing = math.atan2(y, x) * (180 / math.pi);
+    return (bearing + 360) % 360; // Normalize to 0-360 degrees
+  }
+
+
+  // ------------------------------------------------------------------
+  // MODIFIED/NEW LOGIC: Handle driver location updates from the request document
+  // ------------------------------------------------------------------
+
+  // Removed: _listenToDriverLocation()
+
+  void _updateDriverPositionFromRequest({required double lat, required double lng}) {
+    if (!mounted) return;
+
+    setState(() {
+      _driverPosition = LatLng(lat, lng);
+      _updateAssignedDriverMarker();
+      _updateAssignedDriverRoute();
+
+      // Center map on the driver's current location when moving
+      _mapController?.animateCamera(CameraUpdate.newLatLngZoom(_driverPosition!, 15));
     });
   }
 
   void _updateAssignedDriverMarker() {
     if (_driverPosition == null) return;
 
+    double rotation = 0.0;
+    if (_lastDriverLocation != null) {
+      rotation = _calculateBearing(_lastDriverLocation!, _driverPosition!);
+    }
+    _lastDriverLocation = _driverPosition;
+
     _markers.removeWhere((marker) => marker.markerId.value == 'assigned_driver');
+
+    BitmapDescriptor iconToUse = _vehicleType?.toLowerCase() == 'motorbike'
+        ? _motorbikeIcon ?? _assignedDriverIcon!
+        : _bicycleIcon ?? _assignedDriverIcon!;
 
     final marker = Marker(
       markerId: const MarkerId('assigned_driver'),
       position: _driverPosition!,
-      icon: _assignedDriverIcon ?? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+      icon: iconToUse,
       infoWindow: const InfoWindow(
-        title: '🚗 Your Driver',
-        snippet: 'On the way to you',
+        title: '🏍️ Your Driver',
       ),
+      rotation: rotation,
+      flat: true,
       anchor: const Offset(0.5, 0.5),
       zIndex: 9,
     );
 
     _markers.add(marker);
-    _fitAllMarkers();
   }
 
   void _updateAssignedDriverRoute() async {
@@ -543,42 +607,60 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
     final dropoffLat = (widget.deliveryData['dropoffLat'] ?? widget.deliveryData['destinationLat']) as double?;
     final dropoffLng = (widget.deliveryData['dropoffLng'] ?? widget.deliveryData['destinationLng']) as double?;
 
-    _polylines.removeWhere((polyline) => polyline.polylineId.value == 'assigned_driver_route');
-
     LatLng? targetPoint;
 
-    if (_currentStatus == 'accepted' || _currentStatus == 'driver_on_pickup') {
+    // Determine the route target based on status
+    if (_currentStatus == 'accepted' || _currentStatus == 'in-progress') {
       if (pickupLat != null && pickupLng != null) {
         targetPoint = LatLng(pickupLat, pickupLng);
       }
-    } else if (_currentStatus == 'driver_on_delivery' || _currentStatus == 'in_progress') {
+    } else if (_currentStatus == 'heading_to_destination') {
       if (dropoffLat != null && dropoffLng != null) {
         targetPoint = LatLng(dropoffLat, dropoffLng);
       }
     }
 
-    if (targetPoint != null) {
-      final result = await _fetchDirections(_driverPosition!, targetPoint);
-
-      if (result.points.isNotEmpty && mounted) {
-        setState(() {
-          _polylines.add(Polyline(
-            polylineId: const PolylineId('assigned_driver_route'),
-            color: Colors.orange,
-            width: 6,
-            points: result.points,
-            startCap: Cap.roundCap,
-            endCap: Cap.roundCap,
-            jointType: JointType.round,
-            zIndex: 5,
-          ));
-        });
-      }
+    // CRITICAL GUARD: Ensure we have a valid target point before proceeding.
+    if (targetPoint == null) {
+      _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('assigned_driver_route_'));
+      setState(() {});
+      return;
     }
+
+    // Clear previous segmented polylines
+    _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('assigned_driver_route_'));
+
+    // Fetch the route from the driver's current position to the target point
+    final result = await _fetchDirections(_driverPosition!, targetPoint);
+    final fullRoutePoints = result.points;
+
+    if (fullRoutePoints.isNotEmpty && mounted) {
+      // Draw the entire path from the driver to the target in blue
+      _polylines.add(
+        Polyline(
+          polylineId: const PolylineId('assigned_driver_route_future'),
+          points: fullRoutePoints,
+          color: Colors.blue, // Blue for the remaining path
+          width: 8,
+          jointType: JointType.round,
+          zIndex: 5,
+        ),
+      );
+    }
+
+    setState(() {});
   }
 
+  // MODIFIED: This function now handles both status updates AND location updates
   void _listenToRequestUpdates() {
     _requestUpdatesSubscription?.cancel();
+
+    // After assignment, stop listening to nearby drivers
+    _availableDriversSubscription?.cancel();
+
+    // Clear nearby driver markers/polylines
+    _updateAvailableDriverMarkers();
+    _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('connection_'));
 
     _requestUpdatesSubscription = FirebaseFirestore.instance
         .collection('requests')
@@ -589,18 +671,40 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
         final data = snapshot.data()!;
         final newStatus = data['status'] as String?;
         final newDriverId = data['driverId'] as String?;
+        final driverLat = data['driverLat'] as double?; // <-- New field extraction
+        final driverLng = data['driverLog'] as double?; // <-- New field extraction
 
         setState(() {
           _currentStatus = newStatus;
+          // The driverId check remains useful for initial setup logic
           if (newDriverId != null && newDriverId != _driverId) {
             _driverId = newDriverId;
-            _listenToDriverLocation();
+            // Since we rely on the request stream now, no need to call another listener here.
+            // But we do need to stop listening to nearby drivers if a driver is assigned.
+            _availableDriversSubscription?.cancel();
           }
         });
-        _updateAssignedDriverRoute();
+
+        // Use the extracted driver location for updates
+        if (driverLat != null && driverLng != null) {
+          _updateDriverPositionFromRequest(lat: driverLat, lng: driverLng);
+        } else if (_driverId != null && _driverId!.isNotEmpty) {
+          // If a driver is assigned but location is momentarily null,
+          // ensure markers/routes are cleared if delivery is completed or cancelled.
+          if (_currentStatus == 'delivered' || _currentStatus == 'cancelled') {
+            _driverPosition = null;
+            _markers.removeWhere((marker) => marker.markerId.value == 'assigned_driver');
+            _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('assigned_driver_route_'));
+            if(mounted) setState(() {});
+          }
+        }
       }
     });
+
   }
+  // ------------------------------------------------------------------
+  // END OF MODIFIED/NEW LOGIC
+  // ------------------------------------------------------------------
 
   Future<_RouteResult> _fetchDirections(LatLng origin, LatLng dest) async {
     final url = Uri.parse(
@@ -615,6 +719,7 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       final response = await http.get(url);
 
       if (response.statusCode != 200) {
+        debugPrint('⚠️ Directions API failed with status code: ${response.statusCode}');
         return _RouteResult(points: const []);
       }
 
@@ -622,6 +727,7 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       final status = data['status'] as String?;
 
       if (status != 'OK') {
+        debugPrint('⚠️ Directions API status not OK: $status. Error: ${data['error_message']}');
         return _RouteResult(points: const []);
       }
 
@@ -648,6 +754,7 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
         durationText: duration,
       );
     } catch (e) {
+      debugPrint('🚨 Error fetching directions: $e');
       return _RouteResult(points: const []);
     }
   }
@@ -701,9 +808,12 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
     }
     if (_driverPosition != null) points.add(_driverPosition!);
 
-    for (final driver in _availableDrivers) {
-      points.add(LatLng(driver['latitude'] as double, driver['longitude'] as double));
+    if (_driverId == null || _driverId!.isEmpty) {
+      for (final driver in _availableDrivers) {
+        points.add(LatLng(driver['latitude'] as double, driver['longitude'] as double));
+      }
     }
+
 
     if (points.length < 2) return;
 
@@ -732,10 +842,9 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       case 'searching':
         return 'Finding ${_vehicleType == 'motorbike' ? 'Motorbike' : 'Bicycle'} Drivers';
       case 'accepted':
-      case 'driver_on_pickup':
+      case 'in-progress':
         return 'Driver Coming to Pickup';
-      case 'in_progress':
-      case 'driver_on_delivery':
+      case 'heading_to_destination':
         return 'On the Way to Destination';
       default:
         return 'Delivery Tracking';
@@ -743,20 +852,25 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
   }
 
   String _getStatusMessage() {
+
     final count = _availableDrivers.length;
     switch (_currentStatus) {
       case 'pending':
       case 'searching':
         return '$count ${_vehicleType == 'motorbike' ? 'motorbikes' : 'bicycles'} available nearby';
       case 'accepted':
-      case 'driver_on_pickup':
+      case 'in-progress':
         return 'Driver is heading to pickup location';
-      case 'in_progress':
-      case 'driver_on_delivery':
+      case 'heading_to_destination':
         return 'Package being delivered to destination';
       default:
         return 'Tracking your delivery';
     }
+
+  }
+
+  String statusMessage() {
+    return _getStatusMessage();
   }
 
   @override
@@ -787,440 +901,160 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
           zoomControlsEnabled: false,
           compassEnabled: true,
           trafficEnabled: false,
-          buildingsEnabled: true,
-          mapToolbarEnabled: false,
-          mapType: _currentMapType, // Toggle between normal, satellite, hybrid
+          mapType: _currentMapType,
         ),
 
-        // Map Type Toggle Button
+        // Toggle Map Type Button
         Positioned(
-          top: MediaQuery.of(context).padding.top + 200,
-          right: 16,
-          child: Material(
-            elevation: 8,
-            borderRadius: BorderRadius.circular(12),
-            child: InkWell(
-              onTap: _toggleMapType,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _currentMapType == MapType.normal
-                          ? Icons.layers
-                          : _currentMapType == MapType.satellite
-                          ? Icons.satellite_alt
-                          : Icons.map,
-                      color: const Color(0xFF1A2B7B),
-                      size: 24,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _currentMapType == MapType.normal
-                          ? 'Street'
-                          : _currentMapType == MapType.satellite
-                          ? 'Satellite'
-                          : 'Hybrid',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF1A2B7B),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          top: 10,
+          right: 10,
+          child: FloatingActionButton.small(
+            heroTag: 'mapType',
+            onPressed: _toggleMapType,
+            backgroundColor: const Color(0xFF1A2B7B),
+            elevation: 4,
+            child: const Icon(
+              Icons.layers,
+              color: Colors.white,
+              size: 20,
             ),
           ),
         ),
 
-        // Loading overlay for map initialization
-        if (_isLoadingMap || _isLoadingRoute)
-          Positioned.fill(
-            child: Container(
-              color: Colors.white.withOpacity(0.8),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const CircularProgressIndicator(
-                      valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1A2B7B)),
-                      strokeWidth: 3,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      _isLoadingMap ? 'Loading map...' : 'Calculating route...',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF1A2B7B),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-        // Top status card
+        // Recenter Button
         Positioned(
-          top: MediaQuery.of(context).padding.top + 16,
-          left: 16,
-          right: 16,
-          child: _buildStatusCard(),
-        ),
-
-        // Distance/Duration chip with loader
-        if (_mainRouteDistance != null || _mainRouteDuration != null || _isLoadingRoute)
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 140,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: _isLoadingRoute
-                    ? Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: const [
-                    SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1A2B7B)),
-                      ),
-                    ),
-                    SizedBox(width: 12),
-                    Text(
-                      'Calculating route...',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                )
-                    : Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.route, size: 18, color: Colors.black87),
-                    const SizedBox(width: 8),
-                    Text(
-                      [
-                        if (_mainRouteDistance != null) _mainRouteDistance!,
-                        if (_mainRouteDuration != null) _mainRouteDuration!,
-                      ].join(' • '),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          top: 70,
+          right: 10,
+          child: FloatingActionButton.small(
+            heroTag: 'recenter',
+            onPressed: _fitAllMarkers,
+            backgroundColor: Colors.white,
+            elevation: 4,
+            child: const Icon(
+              Icons.screen_rotation_alt,
+              color: Color(0xFF1A2B7B),
+              size: 20,
             ),
           ),
+        ),
 
-        // Legend
+        // Status Card
         Positioned(
-          bottom: MediaQuery.of(context).padding.bottom + 80,
-          left: 16,
-          right: 16,
-          child: _buildLegend(),
-        ),
-
-        // Cancel button
-        if (_currentStatus == 'pending' ||
-            _currentStatus == 'searching' ||
-            _currentStatus == 'accepted')
-          Positioned(
-            bottom: MediaQuery.of(context).padding.bottom + 16,
-            left: 16,
-            right: 16,
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.redAccent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 10,
+                  spreadRadius: 5,
+                  offset: const Offset(0, -3),
                 ),
-                elevation: 8,
+              ],
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(20),
+                topRight: Radius.circular(20),
               ),
-              icon: const Icon(Icons.cancel_outlined, size: 22),
-              label: const Text(
-                'Cancel Delivery',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              onPressed: _showCancelDialog,
             ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildStatusCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A2B7B),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.3),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          _buildVehicleIcon(),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _getStatusTitle(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 17,
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _getStatusTitle(),
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1A2B7B),
+                        ),
+                      ),
+                      // if (_isLoadingRoute || _isLoadingDrivers)
+                      //   const SizedBox(
+                      //     width: 16,
+                      //     height: 16,
+                      //     child: CircularProgressIndicator(
+                      //       strokeWidth: 2,
+                      //       valueColor: AlwaysStoppedAnimation<Color>(
+                      //           Color(0xFF1A2B7B)),
+                      //     ),
+                      //   ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    if (_isLoadingDrivers) ...[
-                      const SizedBox(
-                        width: 12,
-                        height: 12,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 1.5,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white70),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Finding drivers...',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
-                      ),
-                    ] else
-                      Expanded(
-                        child: Text(
-                          _getStatusMessage(),
+                  const SizedBox(height: 5),
+                  Text(
+                    _getStatusMessage(),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[700],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  if (_mainRouteDistance != null) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Icon(Icons.route, color: Colors.green, size: 18),
+                        const SizedBox(width: 5),
+                        Text(
+                          'Trip Distance: ${_mainRouteDistance ?? 'N/A'}',
                           style: const TextStyle(
-                            color: Colors.white70,
                             fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black
                           ),
                         ),
-                      ),
-                  ],
-                ),
-                if (_currentStatus == 'pending' || _currentStatus == 'searching') ...[
-                  const SizedBox(height: 10),
-                  LinearProgressIndicator(
-                    backgroundColor: Colors.white.withOpacity(0.3),
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      _vehicleType == 'motorbike' ? Colors.orange : Colors.lightGreen,
+                        const SizedBox(width: 15),
+                        const Icon(Icons.timer, color: Colors.green, size: 18),
+                        const SizedBox(width: 5),
+                        Text(
+                          'Duration: ${_mainRouteDuration ?? 'N/A'}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                  ],
+                  // Example of a conditional button based on status
+                  if (_currentStatus == 'searching')
+                    Padding(
+                      padding: const EdgeInsets.only(top: 15.0),
+                      child: ElevatedButton(
+                        onPressed: () {
+                          // Handle cancel request logic here
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Cancelling request... (Not implemented)')),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          minimumSize: const Size(double.infinity, 45),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        child: const Text(
+                          'Cancel Delivery Request',
+                          style: TextStyle(fontSize: 16, color: Colors.white),
+                        ),
+                      ),
+                    ),
                 ],
-              ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildVehicleIcon() {
-    final isMotorbike = _vehicleType == 'motorbike';
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: isMotorbike ? Colors.orange : Colors.lightGreen,
-        shape: BoxShape.circle,
-      ),
-      child: Icon(
-        isMotorbike ? Icons.motorcycle : Icons.pedal_bike,
-        color: Colors.white,
-        size: 26,
-      ),
-    );
-  }
-
-  Widget _buildLegend() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.15),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildLegendItem('Pickup', Colors.green),
-              _buildLegendItem('Destination', Colors.red),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildLegendItem('Available', Colors.blue),
-              _buildLegendItem('Your Driver', Colors.orange),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLegendItem(String text, Color color) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 2),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          text,
-          style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: Colors.black87,
           ),
         ),
       ],
     );
   }
-
-  Future<void> _showCancelDialog() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1A2B7B),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: const Text(
-          'Cancel Delivery',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        content: const Text(
-          'Are you sure you want to cancel this delivery request?',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text(
-              'No, Keep It',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Yes, Cancel'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      try {
-        await FirebaseFirestore.instance
-            .collection('requests')
-            .doc(widget.requestId)
-            .update({
-          'status': 'cancelled',
-          'cancelledAt': FieldValue.serverTimestamp(),
-        });
-
-        if (mounted) {
-          Navigator.of(context).pop('cancelled');
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to cancel: $e'),
-              backgroundColor: Colors.redAccent,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _driverLocationSubscription?.cancel();
-    _requestUpdatesSubscription?.cancel();
-    _availableDriversSubscription?.cancel();
-    _mapController?.dispose();
-    super.dispose();
-  }
-}
-
-class _RouteResult {
-  final List<LatLng> points;
-  final String? distanceText;
-  final String? durationText;
-
-  _RouteResult({
-    required this.points,
-    this.distanceText,
-    this.durationText,
-  });
 }

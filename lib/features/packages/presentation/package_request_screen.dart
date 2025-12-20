@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
 
+import '../../../core/bootstrap/app_bootstrap.dart';
 import '../../../global/global_vars.dart';
 import '../../maps/map_fullscreen_picker.dart';
 import '../../../core/services/places_service.dart';
@@ -81,6 +82,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
   final _receiverPhoneCtrl = TextEditingController();
   final _pickupCtrl = TextEditingController();
   final _destCtrl = TextEditingController();
+  final _receiverNameCtrl = TextEditingController();
 
   double? totalCharge;
   List<File> pickupPhotos = [];
@@ -105,10 +107,16 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     _currentDestinationLatLng = widget.destinationLatLng;
     _currentDistanceKm = widget.initialDistanceKm;
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadSenderPhone();
-      _calculateAndUpdatePrice();
-    });
+    // WidgetsBinding.instance.addPostFrameCallback((_) {
+    //   //_loadSenderPhone();
+    //   _calculateAndUpdatePrice();
+    // });
+
+    final phone = AppBootstrap.I.userPhone;
+    if (phone != null && phone.isNotEmpty) {
+      _senderPhoneCtrl.text = phone;
+    }
+    _calculateAndUpdatePrice();
 
     _senderPhoneCtrl.addListener(() => setState(() {}));
     _receiverPhoneCtrl.addListener(() => setState(() {}));
@@ -120,24 +128,25 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     _receiverPhoneCtrl.dispose();
     _pickupCtrl.dispose();
     _destCtrl.dispose();
+    _receiverNameCtrl.dispose();
     super.dispose();
   }
 
   // -------------------- SharedPrefs Phone --------------------
 
-  Future<void> _loadSenderPhone() async {
-    final prefs = sharedPreferences;
-    if (prefs == null) return;
-    final keys = <String>['phone', 'phoneNumber', 'mobile', 'msisdn'];
-    for (final k in keys) {
-      final v = prefs.getString(k);
-      if (v != null && v.trim().isNotEmpty) {
-        if (!mounted) return;
-        setState(() => _senderPhoneCtrl.text = v.trim());
-        break;
-      }
-    }
-  }
+  // Future<void> _loadSenderPhone() async {
+  //   final prefs = sharedPreferences;
+  //   if (prefs == null) return;
+  //   final keys = <String>['phone', 'phoneNumber', 'mobile', 'msisdn'];
+  //   for (final k in keys) {
+  //     final v = prefs.getString(k);
+  //     if (v != null && v.trim().isNotEmpty) {
+  //       if (!mounted) return;
+  //       setState(() => _senderPhoneCtrl.text = v.trim());
+  //       break;
+  //     }
+  //   }
+  // }
 
   Future<void> _editSenderNumber() async {
     final ctrl = TextEditingController(text: _senderPhoneCtrl.text);
@@ -185,7 +194,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
 
     if (result != null && mounted) {
       setState(() => _senderPhoneCtrl.text = result);
-      await sharedPreferences?.setString('phone', result);
+      await AppBootstrap.I.setUserPhone(result);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sender number saved')),
       );
@@ -353,6 +362,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
 
     if (selected != null && selected.phones.isNotEmpty) {
       setState(() => controller.text = selected.phones.first.number);
+      _receiverNameCtrl.text = selected.displayName;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Contact added: ${selected.displayName}')),
       );
@@ -531,7 +541,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Request sent. Finding $_vehicleType drivers...')),
+        SnackBar(content: Text('Request sent. Finding drivers...')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -628,7 +638,31 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
             _addressField(label: 'Destination Address', controller: _destCtrl, isPickup: false),
             const SizedBox(height: 12),
             _contactField('Receiver phone number', _receiverPhoneCtrl),
-            const SizedBox(height: 12),
+                          const SizedBox(height: 8),
+
+                          Container(
+                            decoration: const BoxDecoration(
+                              border: Border(bottom: BorderSide(color: Colors.black12)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.person, color: Colors.black54),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: TextField(
+                                    controller: _receiverNameCtrl,
+                                    style: const TextStyle(color: Colors.black, fontSize: 16),
+                                    decoration: const InputDecoration(
+                                      hintText: 'Receiver name',
+                                      border: InputBorder.none,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          const SizedBox(height: 12),
             _attachButton('Attach destination photos', false),
 
             if (destinationPhotos.isNotEmpty) _photoPreview(destinationPhotos, false),
@@ -708,7 +742,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
                         valueColor: AlwaysStoppedAnimation(Colors.white),
                       ),
                     )
-                        : Text('Request ${_vehicleType.toUpperCase()} Delivery',
+                        : Text('Request for Delivery',
                         style: const TextStyle(fontSize: 16)),
                   ),
                 ),
@@ -1060,62 +1094,164 @@ List<LatLng> _decodePolyline(String encoded) {
 }
 
 // Dark contact sheet
-class _ContactListBottomSheet extends StatelessWidget {
+class _ContactListBottomSheet extends StatefulWidget {
   final List<Contact> contacts;
   const _ContactListBottomSheet({required this.contacts});
+
+  @override
+  State<_ContactListBottomSheet> createState() => _ContactListBottomSheetState();
+}
+
+class _ContactListBottomSheetState extends State<_ContactListBottomSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  late List<Contact> _filtered;
+  final _receiverNameCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _filtered = widget.contacts;
+
+    _searchCtrl.addListener(_applyFilter);
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _receiverNameCtrl.dispose();
+    super.dispose();
+  }
+
+  void _applyFilter() {
+    final q = _searchCtrl.text.toLowerCase().trim();
+
+    if (q.isEmpty) {
+      setState(() => _filtered = widget.contacts);
+      return;
+    }
+
+    setState(() {
+      _filtered = widget.contacts.where((c) {
+        final name = c.displayName.toLowerCase();
+        final phones = c.phones.map((p) => p.number.toLowerCase()).join(' ');
+        return name.contains(q) || phones.contains(q);
+      }).toList();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
       decoration: const BoxDecoration(
-        color: Colors.black,
+        color: Color(0xFF1A2B7B),
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
       child: Column(
         children: [
+          // Drag handle
           Container(
             width: 44,
             height: 5,
             margin: const EdgeInsets.only(bottom: 16),
-            decoration:
-            BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(
+              color: Colors.white30,
+              borderRadius: BorderRadius.circular(8),
+            ),
           ),
-          const Text('Select a Contact',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-          const SizedBox(height: 20),
+
+          const Text(
+            'Select a Contact',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // 🔍 SEARCH FIELD
+          TextField(
+            controller: _searchCtrl,
+            style: const TextStyle(color: Colors.white),
+            decoration: InputDecoration(
+              hintText: 'Search name or phone',
+              hintStyle: const TextStyle(color: Colors.white70),
+              prefixIcon: const Icon(Icons.search, color: Colors.white70),
+              filled: true,
+              fillColor: Colors.black26,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // CONTACT LIST
           Expanded(
-            child: contacts.isEmpty
-                ? const Center(child: Text('No contacts found', style: TextStyle(color: Colors.white70)))
+            child: _filtered.isEmpty
+                ? const Center(
+              child: Text(
+                'No matching contacts',
+                style: TextStyle(color: Colors.white70),
+              ),
+            )
                 : ListView.builder(
-              itemCount: contacts.length,
+              itemCount: _filtered.length,
               itemBuilder: (context, i) {
-                final c = contacts[i];
+                final c = _filtered[i];
                 final hasPhone = c.phones.isNotEmpty;
-                final phone = hasPhone ? c.phones.first.number : 'No phone number';
-                final name = c.displayName.isNotEmpty ? c.displayName : 'Unnamed Contact';
+                final phone =
+                hasPhone ? c.phones.first.number : 'No phone number';
+                final name = c.displayName.isNotEmpty
+                    ? c.displayName
+                    : 'Unnamed Contact';
+
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   decoration: BoxDecoration(
-                    color: Colors.grey[900],
+                    color: Colors.grey[700],
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: ListTile(
                     leading: CircleAvatar(
                       backgroundColor: const Color(0xFF1A2B7B),
-                      child: Text(name[0].toUpperCase(), style: const TextStyle(color: Colors.white)),
+                      child: Text(
+                        name[0].toUpperCase(),
+                        style: const TextStyle(color: Colors.white),
+                      ),
                     ),
-                    title: Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
-                    subtitle: Text(phone, style: TextStyle(color: hasPhone ? Colors.white70 : Colors.red[400])),
-                    onTap: hasPhone ? () => Navigator.pop(context, c) : null,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    title: Text(
+                      name,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    subtitle: Text(
+                      phone,
+                      style: TextStyle(
+                        color:
+                        hasPhone ? Colors.white70 : Colors.red[400],
+                      ),
+                    ),
+                    onTap:
+                    hasPhone ? () => Navigator.pop(context, c) : null,
+                    contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16),
                   ),
                 );
               },
             ),
           ),
+
           const SizedBox(height: 16),
+
+          // CANCEL BUTTON
           SafeArea(
             child: SizedBox(
               width: double.infinity,
@@ -1125,9 +1261,14 @@ class _ContactListBottomSheet extends StatelessWidget {
                   backgroundColor: Colors.grey[800],
                   foregroundColor: Colors.white,
                   minimumSize: const Size(double.infinity, 52),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
-                child: const Text('Cancel', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
               ),
             ),
           ),

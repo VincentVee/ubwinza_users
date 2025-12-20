@@ -11,9 +11,14 @@ class OrderService {
     required String sellerId,
     required List<CartItem> items,
     required DeliveryCalculation delivery, // from your DeliveryProvider
-    required LatLng dropoff,               // user’s chosen delivery location
+    required LatLng dropoff, // user’s chosen delivery location
     required String rideType,              // 'motorbike' | 'bicycle'
     String? note,
+    double? driverLat,
+    double? driverLng,
+    String? driverName,
+    String? driverImage,
+    String? driverId,
   }) async {
     final doc = _db.collection('orders').doc();
 
@@ -67,6 +72,11 @@ class OrderService {
 
       // optional free text
       'note'        : note,
+      'driverLat': driverLat,
+      'driverLng': driverLng,
+      'driverName': driverName,
+      'driverImage': driverImage,
+      'driverId': driverId
     });
 
     return doc.id;

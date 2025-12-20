@@ -55,7 +55,7 @@ class ChoiceTile extends StatelessWidget {
                 child: Text(
                   label,
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Colors.yellow,
                     fontWeight: FontWeight.w700,
                     shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
                   ),

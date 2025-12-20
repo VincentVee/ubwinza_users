@@ -23,6 +23,7 @@ class _SignupScreenState extends State<SignupScreen> {
   TextEditingController emailTextEditingController = TextEditingController();
   TextEditingController passwordTextEditingController = TextEditingController();
   TextEditingController confirmTextEditingController = TextEditingController();
+  TextEditingController phoneTextEditingController = TextEditingController();
 
   GlobalKey<FormState> formKey = GlobalKey<FormState>();
 
@@ -81,6 +82,14 @@ class _SignupScreenState extends State<SignupScreen> {
                   ),
 
                   CustomeTextField(
+                    textEditingController: phoneTextEditingController,
+                    iconData: Icons.phone,
+                    hintString: "Phone Number",
+                    isObsecure: false,
+                    enable: true,
+                  ),
+
+                  CustomeTextField(
 
                     textEditingController: passwordTextEditingController,
                     iconData: Icons.lock,
@@ -107,6 +116,7 @@ class _SignupScreenState extends State<SignupScreen> {
                           confirmTextEditingController.text.trim(),
                           emailTextEditingController.text.trim(),
                           nameTextEditingController.text.trim(),
+                          phoneTextEditingController.text.trim(),
                           context
                       );
                     },

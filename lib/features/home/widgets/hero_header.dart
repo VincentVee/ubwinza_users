@@ -1,3 +1,5 @@
+// lib/features/home/ui/widgets/hero_header.dart
+
 import 'package:flutter/material.dart';
 import 'package:ubwinza_users/features/food/ui/food_home_screen.dart';
 import 'package:ubwinza_users/global/global_instances.dart';
@@ -10,11 +12,15 @@ class HeroHeader extends StatelessWidget {
   final VoidCallback onPickBicycle;
   final String vehicleType;
 
+  // MODIFIED: Widget is now nullable and defaults to a Sizedbox.shrink()
+  final Widget? locationHeader;
+
   const HeroHeader({
     super.key,
     required this.onPickMotor,
     required this.onPickBicycle,
     required this.vehicleType,
+    this.locationHeader, // <-- NO LONGER REQUIRED
   });
 
   @override
@@ -29,29 +35,39 @@ class HeroHeader extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           boxShadow: [BoxShadow(color: Colors.black.withOpacity(.08), blurRadius: 10, offset: const Offset(0, 6))],
         ),
+        // Adjusted padding to account for the content inside
         padding: const EdgeInsets.fromLTRB(16, 18, 16, 18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-
           children: [
             const SizedBox(height: 20),
 
-            Row(children: [
-              const Text('Ubwinza', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
-            ]),
+            // Ubwinza Title
+            // const Row(children: [
+            //   Text('Ubwinza', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800)),
+            // ]),
 
-            const SizedBox(height: 14),
+            // Location Header: Only show if provided
+            if (locationHeader != null) ...[
+              const SizedBox(height: 4),
+              locationHeader!, // <-- Display the optional widget
+              const SizedBox(height: 14),
+            ] else
+              const SizedBox(height: 14), // Maintain spacing if no location header is present
+
+
+            // Vehicle Picker (Bike/Car)
             Row(children: [
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.all(Radius.circular(8)),
-                    color: isMotor? Colors.grey : null,
+                    borderRadius: const BorderRadius.all(Radius.circular(8)),
+                    color: isMotor ? Colors.grey : null,
                   ),
                   child: ChoiceTile(
                     selected: isMotor,
-                    label: 'Delivery by motor bikes',
-                    image: 'images/bike.jpg',
+                    label: 'Bike Delivery',
+                    image: 'images/bike-delivery.jpg',
                     onTap: onPickMotor,
                   ),
                 ),
@@ -60,35 +76,34 @@ class HeroHeader extends StatelessWidget {
               Expanded(
                 child: Container(
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.all(Radius.circular(8)),
-                    color: isMotor? null: Colors.grey,
+                    borderRadius: const BorderRadius.all(Radius.circular(8)),
+                    color: isMotor ? null : Colors.grey,
                   ),
                   child: ChoiceTile(
                     selected: !isMotor,
-                    label: 'Delivery by bicycles',
-                    image: 'images/cycling.webp',
-                    onTap: onPickBicycle,
+                    label: 'Car Delivery coming soon',
+                    image: 'images/delivery-truck.avif',
+                    onTap: ()=> null,
                   ),
                 ),
               ),
             ]),
             const SizedBox(height: 18),
+
+            // Delivery Items Text
             const Text(
               'We can deliver the following items right at your doorstep:',
               style: TextStyle(color: Colors.white70, fontSize: 14),
             ),
             const SizedBox(height: 10),
 
-// Clickable delivery items
+            // Clickable delivery items (Packages, Food)
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 GestureDetector(
                   onTap: () {
-                    // TODO: Navigate to Packages page
-                    // Navigator.push(context, MaterialPageRoute(builder: (_) => PackagesScreen()));
                     Navigator.push(context, MaterialPageRoute(builder: (context) => PackageCreateScreen(googleApiKey: googleApiKey)));
-
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
@@ -112,9 +127,7 @@ class HeroHeader extends StatelessWidget {
 
                 GestureDetector(
                   onTap: () {
-                    // TODO: Navigate to Food page
-                    Navigator.push(context, MaterialPageRoute(builder: (context) => FoodHomeScreen()));
-
+                    Navigator.push(context, MaterialPageRoute(builder: (context) => const FoodHomeScreen()));
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
@@ -135,11 +148,8 @@ class HeroHeader extends StatelessWidget {
                     ),
                   ),
                 ),
-
-
               ],
             ),
-
           ],
         ),
       ),

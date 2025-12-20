@@ -33,8 +33,8 @@ class _DeliveriesListScreenState extends State<DeliveriesListScreen> {
           'searching',
           'accepted',
           'driver_on_pickup',
-          'driver_on_delivery',
-          'in_progress',
+          'heading_to_destination',
+          'in-progress',
         ])
             .snapshots(),
         builder: (context, snapshot) {

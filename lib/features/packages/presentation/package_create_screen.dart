@@ -6,6 +6,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:ubwinza_users/features/packages/presentation/package_request_screen.dart';
 
+import '../../../core/bootstrap/app_bootstrap.dart';
 import '../../../core/models/delivery_method.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/pref_service.dart';
@@ -53,18 +54,33 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
   @override
   void initState() {
     super.initState();
-    _places = PlaceService(widget.googleApiKey);
+    //_places = PlaceService(widget.googleApiKey);
     _bootstrap();
   }
 
   Future<void> _bootstrap() async {
-    final pos = await LocationService.current();
-    final saved = await PrefsService.I.getDeliveryMethod();
+    final boot = AppBootstrap.I;
+
+    // Ensure bootstrap is initialized
+    if (!boot.isReady) {
+      await boot.init(googleApiKey: widget.googleApiKey);
+    }
+
+    if (!mounted) return;
+
     setState(() {
-      _me = LatLng(pos.latitude, pos.longitude);
-      _method = saved;
+      _me = boot.currentLocation;
+      _method = boot.deliveryMethod;
+      _places = boot.places;
     });
+
+    // *** ADD THIS LINE TO SET LOCATION BIAS ***
+    if (_me != null) {
+      _places.setCurrentLocation(_me!);
+    }
+    // *******************************************
   }
+
 
   // === Helpers ===
   Future<void> _flyTo(LatLng target) async {
@@ -400,11 +416,8 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                             label: 'Pickup Address',
                             onPlacePicked: _onPickupPicked,
                             onMapTap: () => _pickOnMap(forPickup: true),
-                            onClear: () {
-                              setState(() {
-                                _pickup = null;
-                                _pickupCtrl.clear();
-                              });
+                            onClear: () { // <--- Correctly passing the logic
+                              setState(() => _pickup = null);
                               _updateRoute();
                             },
                           ),
@@ -418,11 +431,8 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                             label: 'Destination Address',
                             onPlacePicked: _onDestPicked,
                             onMapTap: () => _pickOnMap(forPickup: false),
-                            onClear: () {
-                              setState(() {
-                                _dest = null;
-                                _destCtrl.clear();
-                              });
+                            onClear: () { // <--- Correctly passing the logic
+                              setState(() => _dest = null);
                               _updateRoute();
                             },
                           ),
@@ -449,7 +459,7 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                           ],
                         ),
                         const SizedBox(height: 16),
-
+                       /*
                         const Text(
                           'Current delivery method (tap to change)',
                           style: TextStyle(
@@ -493,6 +503,7 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                             ],
                           ),
                         ),
+                        */
                         const SizedBox(height: 16),
 
                         SizedBox(

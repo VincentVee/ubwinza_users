@@ -50,6 +50,9 @@ dependencies:
   http: ^1.2.2
   flutter_contacts: ^1.1.7
   cached_network_image:
+  url_launcher:
+  intl:
+  flutter_rating_bar:
 
 
 

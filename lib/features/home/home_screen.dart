@@ -1,18 +1,22 @@
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:ubwinza_users/features/delivery/presentation/deliveries_tracking_view.dart';
-import 'package:ubwinza_users/features/delivery/state/delivery_provider.dart';
-import 'package:ubwinza_users/features/order/data/presentation/order_tracking_view.dart';
-import '../../core/models/current_location.dart';
+import 'package:ubwinza_users/features/home/widgets/simple_location_picker.dart';
+import 'package:ubwinza_users/features/order/data/presentation/order_history_page.dart';
+import '../../core/bootstrap/app_bootstrap.dart';
 import '../../core/models/delivery_method.dart';
+import '../../core/models/location_model.dart';
 import '../../core/services/pref_service.dart';
+import '../../global/global_vars.dart';
+import '../../view_models/auth_view_model.dart';
+// Import the new ProfileScreen
 import '../delivery/presentation/deliveries_list_screen.dart';
+import '../delivery/presentation/history.dart';
+import '../delivery/state/delivery_provider.dart';
 import '../maps/nearby_drivers_view_model.dart';
-import 'widgets/drivers_map.dart';
+import '../profile/presentation/profile_screen.dart';
 import 'widgets/hero_header.dart';
+
 
 class UserHomeScreen extends StatefulWidget {
   const UserHomeScreen({super.key});
@@ -22,123 +26,330 @@ class UserHomeScreen extends StatefulWidget {
 }
 
 class _UserHomeScreenState extends State<UserHomeScreen> {
-  GoogleMapController? _map;
-  LatLng? _center;
   String _vehicle = 'motorbike';
-  int _selectedIndex = 0;
-  final String googleApiKey = "AIzaSyC24a0-yk2HG6ONDtpbPRlL_lWkxeqqQ2Y";
 
   @override
   void initState() {
     super.initState();
-    _bootstrap();
+    // The LocationViewModel should be initialized in main.dart via MultiProvider.
+    // Reading it here is generally safe if the Provider is above this widget.
   }
 
-  Future<void> _bootstrap() async {
-    final me = await getCurrentLocation();
-    setState(() => _center = LatLng(me.lat, me.lng));
-  }
+  // ================= LOCATION DISPLAY/MENU =================
+  Widget _locationDisplay(BuildContext context) {
+    return InkWell(
+      onTap: () async {
+        final boot = AppBootstrap.I;
+        // Check if boot is ready before proceeding
+        if (!boot.isReady) {
+          // You should not call init here if it was done in main.dart,
+          // but we keep the logic for robustness.
+          await boot.init(googleApiKey: googleApiKey);
+        }
 
-  void _onItemTapped(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-  }
+        final result = await showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (BuildContext context) {
+            return SimpleLocationPickerScreen(
+              googleApiKey: googleApiKey,
+              initialLocation: context.read<LocationViewModel>().currentLocation,
+            );
+          },
+        );
 
-  Widget _buildBody() {
-    if (_selectedIndex == 0) {
-      if (_center == null) {
-        return const Center(child: CircularProgressIndicator());
-      }
+        // Update location if a result is returned
+        if (result != null && result is Map<String, dynamic>) {
+          final location = result['location'];
+          final address = result['address'] as String;
+          if (location != null) {
+            // Note: The result LatLng type is typically google_maps_flutter.LatLng
+            context.read<LocationViewModel>().updateLocation(location as LatLng, address);
+          }
+        }
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.location_on_outlined,
+              color: Colors.white,
+              size: 20,
+            ),
+            const SizedBox(width: 4),
 
-      return ChangeNotifierProvider(
-        key: ValueKey(_vehicle),
-        create: (_) => NearbyDriversViewModel(vehicleType: _vehicle),
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: HeroHeader(
-                vehicleType: _vehicle,
-                onPickMotor: () {
-                  setState(() => _vehicle = 'motorbike');
-                  PrefsService.I.setDeliveryMethod(DeliveryMethod.motorbike);
-                  context.read<DeliveryProvider>().setRideType('motorbike');
-                },
-                onPickBicycle: () {
-                  setState(() => _vehicle = 'bicycle');
-                  PrefsService.I.setDeliveryMethod(DeliveryMethod.bicycle);
-                  context.read<DeliveryProvider>().setRideType('bicycle');
+            // =========================================================
+            // *** FIX: Use Flexible/Expanded to prevent Row Overflow ***
+            // =========================================================
+            Flexible(
+              child: Consumer<LocationViewModel>(
+                builder: (context, locationVM, child) {
+                  return Text(
+                    locationVM.isLoading
+                        ? 'Getting location...'
+                        : locationVM.currentAddress,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                    ),
+                    // Ensure long addresses don't wrap or push off-screen
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  );
                 },
               ),
             ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Text(
-                  'The drivers near you',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                    fontSize: 20,
-                  ),
-                ),
-              ),
-            ),
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: DriversMap(
-                initial: _center!,
-                onCreated: (c) => _map = c,
-              ),
+
+            const Icon(
+              Icons.expand_more,
+              color: Colors.white,
+              size: 20,
             ),
           ],
         ),
-      );
-    } else if (_selectedIndex == 1) {
-      return const DeliveriesListScreen();
-    } else if (_selectedIndex == 2) {
-      return const OrdersTrackingView();
-    } else {
-      return const Center(child: Text('History Page'));
-    }
+      ),
+    );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      body: _buildBody(),
-      bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: const Color(0xFF1A2B7B),
-        currentIndex: _selectedIndex,
-        selectedItemColor: Colors.amberAccent,
-        unselectedItemColor: Colors.white,
-        type: BottomNavigationBarType.fixed,
-        onTap: _onItemTapped,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
+  // ================= PROFILE MENU (UPDATED) =================
+  Widget _profileMenu(BuildContext context) {
+
+    return PopupMenuButton<String>(
+      color: Color(0xFF020A30),
+      onSelected: (value) {
+        if (value == 'profile') {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const ProfileScreen(),
+            ),
+          );
+        } else if (value == 'logout') {
+          AuthViewModel().logout(context);
+        }
+      },
+
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: 'profile',
+          child: Row(
+            children: [
+              Icon(Icons.person_outline, color: Colors.yellowAccent),
+              SizedBox(width: 8),
+              Text('Profile'),
+            ],
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.delivery_dining_outlined),
-            activeIcon: Icon(Icons.delivery_dining),
-            label: 'Deliveries',
+        ),
+        PopupMenuItem(
+          value: 'logout',
+          child: Row(
+            children: [
+              Icon(Icons.logout, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Logout'),
+            ],
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.shopping_bag_outlined),
-            activeIcon: Icon(Icons.shopping_bag),
-            label: 'Orders',
+        ),
+      ],
+      // Use a child for the avatar/icon
+      child: Consumer<AuthViewModel>(
+        builder: (context, authVM, child) {
+          final imageUrl = authVM.getCurrentUser()?.imageUrl;
+          return CircleAvatar(
+            radius: 18,
+            backgroundColor: Colors.white,
+            backgroundImage: imageUrl != null && imageUrl.isNotEmpty
+                ? NetworkImage(imageUrl)
+                : null,
+            child: imageUrl == null || imageUrl.isEmpty
+                ? const Icon(Icons.person, color: Color(0xFF1A2B7B))
+                : null,
+          );
+        },
+      ),
+    );
+  }
+
+  // ================= BODY (No Change) =================
+  Widget _buildBody() {
+    return ChangeNotifierProvider(
+      key: ValueKey(_vehicle),
+      create: (_) => NearbyDriversViewModel(vehicleType: _vehicle),
+      child: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: HeroHeader(
+              vehicleType: _vehicle,
+              onPickMotor: () {
+                setState(() => _vehicle = 'motorbike');
+                PrefsService.I.setDeliveryMethod(DeliveryMethod.motorbike);
+                context.read<DeliveryProvider>().setRideType('motorbike');
+              },
+              onPickBicycle: () {
+                setState(() => _vehicle = 'bicycle');
+                PrefsService.I.setDeliveryMethod(DeliveryMethod.bicycle);
+                context.read<DeliveryProvider>().setRideType('bicycle');
+              },
+            ),
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.history_outlined),
-            activeIcon: Icon(Icons.history),
-            label: 'History',
+          SliverPadding(
+            padding: const EdgeInsets.all(16),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 16,
+                crossAxisSpacing: 16,
+                childAspectRatio: 1.1,
+              ),
+              delegate: SliverChildListDelegate(
+                [
+                  _HomeCard(
+                    icon: Icons.delivery_dining,
+                    title: 'Deliveries',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const DeliveriesListScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _HomeCard(
+                    icon: Icons.shopping_bag,
+                    title: 'Orders',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const OrdersHistoryScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  _HomeCard(
+                    icon: Icons.history,
+                    title: 'History',
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const DeliveryHistoryPage(),
+                        ),
+                      );
+                    },
+                  ),
+                  _HomeCard(
+                    icon: Icons.support_agent,
+                    title: 'Support',
+                    onTap: () {
+                      // TODO: Support action
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
     );
   }
+
+  // ================= SCAFFOLD (No Change) =================
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF1A2B7B),
+              Color(0xFF203A43),
+              Color(0xFF2C5364),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Custom Header Row
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // 1. Location (Now uses Flexible)
+                    Flexible(child: _locationDisplay(context)),
+                    // 2. Profile/Avatar
+                    _profileMenu(context),
+                  ],
+                ),
+              ),
+              // Main content body
+              Expanded(child: _buildBody()),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
+// ... _HomeCard widget remains the same (No Change)
+class _HomeCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+
+  const _HomeCard({
+    required this.icon,
+    required this.title,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.blueGrey,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: 40,
+              color: const Color(0xFF1A2B7B),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

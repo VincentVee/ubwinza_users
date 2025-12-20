@@ -1,8 +1,10 @@
-// lib/shared/widgets/delivery_location_sheet.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
+
+// You will need to import your chosen Places package here, e.g.:
+// import 'package:flutter_google_places/flutter_google_places.dart';
 
 class DeliveryLocationResult {
   final LatLng latLng;
@@ -10,8 +12,6 @@ class DeliveryLocationResult {
   DeliveryLocationResult(this.latLng, {this.address});
 }
 
-/// Opens a bottom sheet with an interactive Google Map to pick a location.
-/// Returns null if the user cancels.
 Future<DeliveryLocationResult?> showDeliveryLocationSheet({
   required BuildContext context,
   LatLng? initialTarget,
@@ -21,7 +21,7 @@ Future<DeliveryLocationResult?> showDeliveryLocationSheet({
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     isDismissible: true,
-    enableDrag: false,
+    enableDrag: true, // Allow standard dragging for better responsiveness
     builder: (_) => _DeliveryLocationSheet(initialTarget: initialTarget),
   );
 }
@@ -37,29 +37,28 @@ class _DeliveryLocationSheet extends StatefulWidget {
 class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     with SingleTickerProviderStateMixin {
   GoogleMapController? _mapController;
+
   LatLng? _currentPosition;
-  String _address = 'Move the map to select location';
+  CameraPosition? _initialCameraPosition;
+
+  String _address = 'Move the map or search above to select location';
   bool _isLoadingAddress = false;
   bool _isDragging = false;
   bool _hasSelectedLocation = false;
+
   late AnimationController _pinAnimationController;
   late Animation<double> _pinAnimation;
 
-  // Debounce timer for address lookup
   Timer? _debounceTimer;
 
-  // Camera position state
-  CameraPosition? _currentCameraPosition;
-
-  static const _fallback = LatLng(-15.3875, 28.3228); // Lusaka, Zambia
-  static const _debounceDuration = Duration(milliseconds: 800);
+  static const _zambiaCenter = LatLng(-13.435, 27.849);
+  static const _debounceDuration = Duration(milliseconds: 600);
 
   @override
   void initState() {
     super.initState();
     _initializeData();
 
-    // Setup pin animation
     _pinAnimationController = AnimationController(
       duration: const Duration(milliseconds: 150),
       vsync: this,
@@ -74,14 +73,14 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
   }
 
   void _initializeData() {
-    _currentPosition = widget.initialTarget ?? _fallback;
-    _currentCameraPosition = CameraPosition(
+    _currentPosition = widget.initialTarget ?? _zambiaCenter;
+    _initialCameraPosition = CameraPosition(
       target: _currentPosition!,
-      zoom: 15,
+      zoom: widget.initialTarget != null ? 15 : 5,
     );
     _hasSelectedLocation = widget.initialTarget != null;
     if (_hasSelectedLocation) {
-      _getAddressFromLatLng(_currentPosition!);
+      Timer.run(() => _getAddressFromLatLng(_currentPosition!, isInitial: true));
     }
   }
 
@@ -93,19 +92,76 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     super.dispose();
   }
 
-  Future<void> _getAddressFromLatLng(LatLng position) async {
-    if (_isLoadingAddress) return;
+  // ==================== SEARCH INTEGRATION POINT ====================
+
+  /// Placeholder for calling the external Places Autocomplete search.
+  Future<void> _showPlacesSearch() async {
+    // ⚠️ IMPORTANT: IMPLEMENT THIS METHOD
+    // You will need a package like 'flutter_google_places' or 'map_location_picker'.
+
+    // Example using a hypothetical package:
+    /*
+    final prediction = await PlacesAutocomplete.show(
+      context: context,
+      apiKey: 'YOUR_PLACES_API_KEY',
+      mode: Mode.overlay, // or Mode.fullscreen
+      language: 'en',
+      components: [Component(Component.country, 'zm')], // Bias results to Zambia
+    );
+
+    if (prediction != null) {
+      await _handleSearchSelection(prediction);
+    }
+    */
+
+    // --- TEMPORARY Mock for demonstration ---
+    final mockResult = DeliveryLocationResult(
+        const LatLng(-15.4167, 28.2833), // Lusaka Mock
+        address: 'Lusaka Main Mall'
+    );
+    if (mockResult != null) {
+      _handleSearchSelection(mockResult.latLng, mockResult.address);
+    }
+    // --- END TEMPORARY Mock ---
+  }
+
+  /// Handles the result from the Places search and updates the map/state.
+  Future<void> _handleSearchSelection(LatLng latLng, String? address) async {
+    _currentPosition = latLng;
+    // Animate the camera to the selected location
+    _mapController?.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(target: latLng, zoom: 17),
+      ),
+    );
+
+    // Manually set the address from the Autocomplete result (faster than Geocoding)
+    if (mounted) {
+      setState(() {
+        _address = address ?? 'Selected from Search';
+        _hasSelectedLocation = true;
+        _isLoadingAddress = false;
+      });
+    }
+  }
+
+
+  // ==================== GEOCODING & MAP HANDLERS (Optimized) ====================
+
+  Future<void> _getAddressFromLatLng(LatLng position, {bool isInitial = false}) async {
+    if (_isLoadingAddress && !isInitial) return;
 
     if (!mounted) return;
     setState(() {
       _isLoadingAddress = true;
+      _address = 'Getting address...';
     });
 
     try {
       final List<Placemark> placemarks = await placemarkFromCoordinates(
         position.latitude,
         position.longitude,
-      );
+      ).timeout(const Duration(seconds: 5));
 
       if (!mounted) return;
 
@@ -118,15 +174,23 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
         });
       } else {
         setState(() {
-          _address = 'Address not found';
+          _address = 'Address not found. Please move the pin.';
           _isLoadingAddress = false;
           _hasSelectedLocation = true;
         });
       }
-    } catch (e) {
+    } on TimeoutException {
       if (!mounted) return;
       setState(() {
-        _address = 'Unable to get address';
+        _address = 'Address lookup timed out.';
+        _isLoadingAddress = false;
+        _hasSelectedLocation = true;
+      });
+    } catch (e) {
+      debugPrint("Geocoding Error: $e");
+      if (!mounted) return;
+      setState(() {
+        _address = 'Unable to get address (Error)';
         _isLoadingAddress = false;
         _hasSelectedLocation = true;
       });
@@ -134,25 +198,17 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
   }
 
   String _formatAddress(Placemark place) {
-    final List<String> parts = [];
+    final List<String> parts = [
+      if (place.street?.isNotEmpty == true) place.street!,
+      if (place.subLocality?.isNotEmpty == true) place.subLocality!,
+      if (place.locality?.isNotEmpty == true) place.locality!,
+      if (place.administrativeArea?.isNotEmpty == true && place.administrativeArea != place.locality)
+        place.administrativeArea!,
+    ];
 
-    if (place.street != null && place.street!.isNotEmpty) {
-      parts.add(place.street!);
-    }
-    if (place.subLocality != null && place.subLocality!.isNotEmpty) {
-      parts.add(place.subLocality!);
-    }
-    if (place.locality != null && place.locality!.isNotEmpty) {
-      parts.add(place.locality!);
-    }
-    if (place.administrativeArea != null && place.administrativeArea!.isNotEmpty) {
-      parts.add(place.administrativeArea!);
-    }
-    if (place.country != null && place.country!.isNotEmpty) {
-      parts.add(place.country!);
-    }
+    final uniqueParts = parts.toSet().toList();
 
-    return parts.isEmpty ? 'Unknown location' : parts.join(', ');
+    return uniqueParts.isEmpty ? place.name ?? 'Selected Location' : uniqueParts.join(', ');
   }
 
   void _onMapCreated(GoogleMapController controller) {
@@ -160,36 +216,33 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
   }
 
   void _onCameraMove(CameraPosition position) {
-    // Update position without setState to avoid rebuilds during drag
     _currentPosition = position.target;
 
-    // Only animate pin up once when dragging starts
     if (!_isDragging) {
       if (mounted) {
         setState(() {
           _isDragging = true;
         });
       }
-      if (!_pinAnimationController.isAnimating && _pinAnimationController.value == 0) {
+      if (!_pinAnimationController.isAnimating) {
         _pinAnimationController.forward();
       }
     }
   }
 
   void _onCameraIdle() {
+    if (_pinAnimationController.status == AnimationStatus.forward) {
+      _pinAnimationController.reverse();
+    }
+
     if (mounted) {
       setState(() {
         _isDragging = false;
       });
     }
 
-    // Animate pin down when dragging stops
-    _pinAnimationController.reverse();
-
-    // Cancel any pending address lookup
     _debounceTimer?.cancel();
 
-    // Debounce address lookup to avoid excessive API calls
     _debounceTimer = Timer(_debounceDuration, () {
       if (_currentPosition != null && mounted) {
         _getAddressFromLatLng(_currentPosition!);
@@ -221,33 +274,23 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     Navigator.pop(context);
   }
 
+  // ==================== WIDGET BUILDERS ====================
+
   Widget _buildMapWidget() {
-    if (_currentCameraPosition == null) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+    if (_initialCameraPosition == null) {
+      return const Center(child: CircularProgressIndicator());
     }
 
     return GoogleMap(
-      initialCameraPosition: _currentCameraPosition!,
+      initialCameraPosition: _initialCameraPosition!,
       onMapCreated: _onMapCreated,
       onCameraMove: _onCameraMove,
       onCameraIdle: _onCameraIdle,
-      scrollGesturesEnabled: true,
-      zoomGesturesEnabled: true,
-      tiltGesturesEnabled: false, // Disable tilt for better performance
-      rotateGesturesEnabled: false, // Disable rotation for better performance
       myLocationEnabled: true,
       myLocationButtonEnabled: false,
       zoomControlsEnabled: false,
       mapToolbarEnabled: false,
-      minMaxZoomPreference: const MinMaxZoomPreference(10, 20), // Limit zoom range
-      cameraTargetBounds: CameraTargetBounds.unbounded,
-      compassEnabled: false,
-      buildingsEnabled: true,
-      indoorViewEnabled: false,
-      trafficEnabled: false,
-      liteModeEnabled: false, // Use full rendering for smoother experience
+      minMaxZoomPreference: const MinMaxZoomPreference(5, 20),
     );
   }
 
@@ -291,7 +334,45 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     );
   }
 
+  // NEW: Search Bar Widget
+  Widget _buildSearchBar() {
+    return InkWell(
+      onTap: _showPlacesSearch, // Tapping opens the search screen
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.15),
+              blurRadius: 8,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.search, color: Colors.grey, size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Search for a location or address...',
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 16,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildAddressSection() {
+    // ... (No changes here, remains the same as previous response) ...
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -310,18 +391,19 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
             child: _isLoadingAddress
                 ? Row(
               children: [
-                SizedBox(
+                const SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
+                    key: ValueKey('address_loading'),
                     strokeWidth: 2,
-                    color: const Color(0xFFFF5A3D),
+                    color: Color(0xFFFF5A3D),
                   ),
                 ),
                 const SizedBox(width: 8),
-                const Text(
-                  'Getting address...',
-                  style: TextStyle(
+                Text(
+                  _address,
+                  style: const TextStyle(
                     fontSize: 14,
                     color: Colors.black54,
                   ),
@@ -343,58 +425,6 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
       ),
     );
   }
-
-  /*
-  Widget _buildDeliveryInformation() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.green[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.green[100]!),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              // Icon(
-              //   Icons.local_shipping,
-              //   color: Colors.green[700],
-              //   size: 20,
-              // ),
-              const SizedBox(width: 8),
-              // Text(
-              //   'Delivery Information',
-              //   style: TextStyle(
-              //     fontSize: 16,
-              //     fontWeight: FontWeight.w600,
-              //     color: Colors.green[700],
-              //   ),
-              // ),
-            ],
-          ),
-          // const SizedBox(height: 8),
-          // Text(
-          //   'Delivery Fee: K0',
-          //   style: const TextStyle(
-          //     fontSize: 14,
-          //     color: Colors.black87,
-          //     fontWeight: FontWeight.w500,
-          //   ),
-          // ),
-          const SizedBox(height: 4),
-          // Text(
-          //   'Estimated delivery: 30-45 min',
-          //   style: TextStyle(
-          //     fontSize: 14,
-          //     color: Colors.grey[600],
-          //   ),
-          // ),
-        ],
-      ),
-    );
-  }*/
 
   Widget _buildConfirmButton() {
     final bool isButtonEnabled =
@@ -428,7 +458,6 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
       ),
       child: Column(
         children: [
-          // Drag handle
           Container(
             margin: const EdgeInsets.only(top: 12, bottom: 8),
             width: 40,
@@ -439,7 +468,6 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
             ),
           ),
 
-          // Header
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
@@ -463,30 +491,39 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
 
           const Divider(height: 1),
 
-          // Map section
+          // Map section with Search Bar overlay
           Expanded(
             child: Stack(
               children: [
-                _buildMapWidget(),
+                _buildMapWidget(), // GoogleMap
+
+                // NEW: Search Bar Positioned at the top
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: _buildSearchBar(),
+                ),
+
                 Positioned(
                   right: 16,
                   bottom: 16,
                   child: FloatingActionButton.small(
                     onPressed: _onMyLocationPressed,
                     backgroundColor: Colors.white,
-                    child: Icon(
+                    child: const Icon(
                       Icons.my_location,
-                      color: const Color(0xFFFF5A3D),
+                      color: Color(0xFFFF5A3D),
                       size: 20,
                     ),
                   ),
                 ),
-                _buildPinWidget(),
+                _buildPinWidget(), // Location Pin
               ],
             ),
           ),
 
-          // Bottom section with address and confirm button
+          // Bottom section
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -498,9 +535,6 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
                   offset: const Offset(0, -2),
                 ),
               ],
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
-              ),
             ),
             child: SafeArea(
               top: false,
@@ -508,17 +542,8 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Address display
                   _buildAddressSection(),
-
-                  // Conditionally show delivery information
-                  // if (_hasSelectedLocation && !_isLoadingAddress) ...[
-                  //   const SizedBox(height: 16),
-                  //   _buildDeliveryInformation(),
-                  // ],
-
                   const SizedBox(height: 16),
-                  // Confirm button
                   _buildConfirmButton(),
                 ],
               ),
