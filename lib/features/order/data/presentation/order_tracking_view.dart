@@ -12,7 +12,7 @@ class OrdersTrackingView extends StatelessWidget {
         return 0; // Order placed
       case 'preparing':
         return 1; // Seller preparing
-      case 'onTheWay':
+      case 'heading_to_destination':
         return 2; // Rider on way
       case 'delivered':
         return 3; // Delivered

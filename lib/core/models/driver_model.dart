@@ -7,6 +7,7 @@ class Driver {
   final String phone;
   final String imageUrl;
   final String status; // approved, active, busy, offline
+  final bool isOnline; // <--- ADDED: Explicit online status
   final double latitude;
   final double longitude;
   final String address;
@@ -25,6 +26,7 @@ class Driver {
     required this.phone,
     required this.imageUrl,
     required this.status,
+    required this.isOnline, // <--- ADDED to constructor
     required this.latitude,
     required this.longitude,
     required this.address,
@@ -47,6 +49,7 @@ class Driver {
       phone: data['phone'] ?? '',
       imageUrl: data['imageUrl'] ?? '',
       status: data['status'] ?? 'approved',
+      isOnline: data['isOnline'] ?? false, // <--- POPULATED: From Firestore
       latitude: (data['latitude'] ?? 0.0).toDouble(),
       longitude: (data['longitude'] ?? 0.0).toDouble(),
       address: data['address'] ?? '',
@@ -68,6 +71,7 @@ class Driver {
       'phone': phone,
       'imageUrl': imageUrl,
       'status': status,
+      'isOnline': isOnline, // <--- ADDED to Map
       'latitude': latitude,
       'longitude': longitude,
       'address': address,
@@ -84,6 +88,7 @@ class Driver {
   // Copy with method for updates
   Driver copyWith({
     String? status,
+    bool? isOnline, // <--- ADDED to copyWith
     double? latitude,
     double? longitude,
     double? earnings,
@@ -97,6 +102,7 @@ class Driver {
       phone: phone,
       imageUrl: imageUrl,
       status: status ?? this.status,
+      isOnline: isOnline ?? this.isOnline, // <--- Handled in copyWith
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       address: address,

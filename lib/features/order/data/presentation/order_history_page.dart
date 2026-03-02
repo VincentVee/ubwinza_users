@@ -5,13 +5,18 @@ import 'package:intl/intl.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 // --- 1. DATA MODELS ---
+// The hyphen in the string constant is still problematic for general use if it 
+// is used as a field name, but is okay if just used for matching purposes.
+// We use the corrected snake_case for the enum value itself.
+const inProgress = 'in-progress'; 
 
 enum OrderStatus {
   pending,
-  accepted,
-  driverToPickup,         // Driver heading to the restaurant/pickup location
-  onTheWayToYou,          // Driver heading to the customer/dropoff location
-  delivered,              // Order complete
+  preparing,
+  prepared, // Driver assigned
+  in_progress, // Driver heading to the restaurant/pickup location
+  heading_to_destination, 
+  delivered, // Order complete
   cancelled,
   unknown,
 }
@@ -54,13 +59,14 @@ class OrderModel {
     if (data == null) throw Exception('Order data is null');
 
     // ------------------------------------------------------------------
-    // CORRECTED STATUS PARSING (Direct Match)
+    // STATUS PARSING
     // ------------------------------------------------------------------
     final String statusString = data['status'] as String? ?? 'unknown';
     OrderStatus status = OrderStatus.unknown;
 
     for (var value in OrderStatus.values) {
-      if (value.name == statusString) {
+      // Check for the status string, replacing any hyphens with underscores
+      if (value.name == statusString.replaceAll('-', '_')) {
         status = value;
         break;
       }
@@ -76,32 +82,46 @@ class OrderModel {
     final createdAt = (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now();
 
     // ------------------------------------------------------------------
-    // STATUS HISTORY CREATION (Conceptual/Simulated for Timeline)
-    // NOTE: In a production app, fetch actual timestamps from Firestore.
+    // STATUS HISTORY CREATION (Simulated for Timeline)
+    // FIX: Only populate history up to the current status index.
     // ------------------------------------------------------------------
     final Map<OrderStatus, DateTime> history = {};
+    final currentStatusIndex = status.index;
+    DateTime? lastTime = createdAt;
 
     // 1. Order Placed
-    history[OrderStatus.pending] = createdAt;
-
-    // 2. Accepted
-    if (status.index >= OrderStatus.accepted.index) {
-      history[OrderStatus.accepted] = history[OrderStatus.pending]?.add(const Duration(minutes: 5)) ?? createdAt.add(const Duration(minutes: 5));
+    if (currentStatusIndex >= OrderStatus.pending.index) {
+        history[OrderStatus.pending] = createdAt;
+    }
+    
+    // 2. Order Confirmed (Preparing)
+    if (currentStatusIndex >= OrderStatus.preparing.index) {
+        lastTime = history[OrderStatus.pending]?.add(const Duration(minutes: 5));
+        history[OrderStatus.preparing] = lastTime!;
     }
 
-    // 3. Driver to Pickup
-    if (status.index >= OrderStatus.driverToPickup.index) {
-      history[OrderStatus.driverToPickup] = history[OrderStatus.accepted]?.add(const Duration(minutes: 10)) ?? createdAt.add(const Duration(minutes: 15));
+    // 3. Driver Assigned (Prepared)
+    if (currentStatusIndex >= OrderStatus.prepared.index) {
+        lastTime = history[OrderStatus.preparing]?.add(const Duration(minutes: 5));
+        history[OrderStatus.prepared] = lastTime!;
+    }
+    
+    // 4. Driver Heading to Restaurant (in_progress)
+    if (currentStatusIndex >= OrderStatus.in_progress.index) {
+        lastTime = history[OrderStatus.prepared]?.add(const Duration(minutes: 2));
+        history[OrderStatus.in_progress] = lastTime!;
+    }
+    
+    // 5. On The Way To You (heading_to_destination)
+    if (currentStatusIndex >= OrderStatus.heading_to_destination.index) {
+        lastTime = history[OrderStatus.in_progress]?.add(const Duration(minutes: 15));
+        history[OrderStatus.heading_to_destination] = lastTime!;
     }
 
-    // 4. On The Way To You
-    if (status.index >= OrderStatus.onTheWayToYou.index) {
-      history[OrderStatus.onTheWayToYou] = history[OrderStatus.driverToPickup]?.add(const Duration(minutes: 15)) ?? createdAt.add(const Duration(minutes: 30));
-    }
-
-    // 5. Delivered
-    if (status.index >= OrderStatus.delivered.index) {
-      history[OrderStatus.delivered] = history[OrderStatus.onTheWayToYou]?.add(const Duration(minutes: 5)) ?? createdAt.add(const Duration(minutes: 35));
+    // 6. Delivered
+    if (currentStatusIndex >= OrderStatus.delivered.index) {
+        lastTime = history[OrderStatus.heading_to_destination]?.add(const Duration(minutes: 5));
+        history[OrderStatus.delivered] = lastTime!;
     }
     // ------------------------------------------------------------------
 
@@ -182,12 +202,9 @@ class _OrderCard extends StatelessWidget {
   final OrderModel order;
   const _OrderCard({required this.order});
 
-  // Helper to format status text (e.g., driverToPickup -> Driver To Pickup)
+  // Helper to format status text (e.g., in_progress -> IN PROGRESS)
   String _formatStatus(OrderStatus status) {
-    return status.name.replaceAllMapped(
-      RegExp(r'([A-Z])'),
-          (match) => ' ${match.group(1)}',
-    ).trim().toUpperCase();
+    return status.name.replaceAll('_', ' ').trim().toUpperCase();
   }
 
   // Helper to determine status color
@@ -197,10 +214,11 @@ class _OrderCard extends StatelessWidget {
         return Colors.green.shade600;
       case OrderStatus.cancelled:
         return Colors.red.shade600;
-      case OrderStatus.driverToPickup:
-      case OrderStatus.onTheWayToYou:
+      case OrderStatus.in_progress:
+      case OrderStatus.heading_to_destination:
         return Colors.blue.shade600;
-      case OrderStatus.accepted:
+      case OrderStatus.preparing:
+      case OrderStatus.prepared:
         return Colors.orange.shade600;
       case OrderStatus.pending:
       default:
@@ -210,13 +228,13 @@ class _OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Tracking is active from 'driverToPickup' up to, but not including, 'delivered'
-    final isTrackable = order.status.index >= OrderStatus.driverToPickup.index &&
+    // Tracking is active from 'in_progress' up to, but not including, 'delivered'
+    final isTrackable = order.status.index >= OrderStatus.in_progress.index &&
         order.status != OrderStatus.delivered &&
         order.status != OrderStatus.cancelled;
 
     return Card(
-      color: Color(0xFF1A2B7B),
+      color: const Color(0xFF1A2B7B),
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 6,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
@@ -269,7 +287,7 @@ class _OrderCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
 
-            _OrderTimeline(order: order),
+            _OrderTimeline(order: order), // 
 
             const SizedBox(height: 12),
             // ------------------------------------------------------
@@ -289,7 +307,7 @@ class _OrderCard extends StatelessWidget {
               children: [
                 Text(
                   DateFormat('MMM d, yyyy h:mm a').format(order.createdAt),
-                  style: TextStyle(fontSize: 14, color: Colors.white70),
+                  style: const TextStyle(fontSize: 14, color: Colors.white70),
                 ),
                 Text(
                   'Total: \K${order.total.toStringAsFixed(2)}',
@@ -303,35 +321,35 @@ class _OrderCard extends StatelessWidget {
             ),
 
             // --- TRACKING FEATURE (Conditional Button) ---
-            if (isTrackable) ...[
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (context) => _TrackingScreen(orderId: order.id),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.location_on_outlined, size: 24),
-                  label: const Text(
-                    'Track Driver Live',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: Colors.blue.shade600,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    elevation: 3,
-                  ),
-                ),
-              ),
-            ],
+            // if (isTrackable) ...[
+            //   const SizedBox(height: 16),
+            //   SizedBox(
+            //     width: double.infinity,
+            //     child: ElevatedButton.icon(
+            //       onPressed: () {
+            //         Navigator.of(context).push(
+            //           MaterialPageRoute(
+            //             builder: (context) => _TrackingScreen(orderId: order.id),
+            //           ),
+            //         );
+            //       },
+            //       icon: const Icon(Icons.location_on_outlined, size: 24),
+            //       label: const Text(
+            //         'Track Driver Live',
+            //         style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            //       ),
+            //       style: ElevatedButton.styleFrom(
+            //         foregroundColor: Colors.white,
+            //         backgroundColor: Colors.blue.shade600,
+            //         padding: const EdgeInsets.symmetric(vertical: 12),
+            //         shape: RoundedRectangleBorder(
+            //           borderRadius: BorderRadius.circular(10),
+            //         ),
+            //         elevation: 3,
+            //       ),
+            //     ),
+            //   ),
+            // ],
           ],
         ),
       ),
@@ -347,18 +365,20 @@ class _OrderTimeline extends StatelessWidget {
 
   static const List<OrderStatus> _progressSteps = [
     OrderStatus.pending,
-    OrderStatus.accepted,
-    OrderStatus.driverToPickup,
-    OrderStatus.onTheWayToYou,
+    OrderStatus.preparing,
+    OrderStatus.prepared,
+    OrderStatus.in_progress, // Corrected enum value
+    OrderStatus.heading_to_destination,
     OrderStatus.delivered,
   ];
 
   String _getStepLabel(OrderStatus status) {
     switch (status) {
       case OrderStatus.pending: return 'Order Placed';
-      case OrderStatus.accepted: return 'Order Confirmed';
-      case OrderStatus.driverToPickup: return 'Driver Heading to Restaurant';
-      case OrderStatus.onTheWayToYou: return 'On The Way To You';
+      case OrderStatus.preparing: return 'Order Confirmed';
+      case OrderStatus.prepared: return 'Driver Assigned'; 
+      case OrderStatus.in_progress: return 'Driver Heading to Restaurant'; 
+      case OrderStatus.heading_to_destination: return 'On The Way To You';
       case OrderStatus.delivered: return 'Delivered';
       default: return status.name;
     }
@@ -369,19 +389,27 @@ class _OrderTimeline extends StatelessWidget {
     return Column(
       children: _progressSteps.map((stepStatus) {
         final timestamp = order.statusHistory[stepStatus];
-
-        // Hide steps that haven't occurred and are not the current status
-        if (timestamp == null && order.status.index < stepStatus.index) {
-          return const SizedBox.shrink();
+        final currentStatusIndex = order.status.index;
+        final stepStatusIndex = stepStatus.index;
+        
+        // FIX: HIDE only if the step is definitely in the future AND there is no timestamp.
+        // We only hide steps strictly in the future.
+        if (stepStatusIndex > currentStatusIndex && timestamp == null) {
+            return const SizedBox.shrink();
         }
 
-        final bool isCompleted = timestamp != null;
-        final bool isCurrent = order.status == stepStatus && !isCompleted;
+        // Determine step state
+        final bool isCompletedStep = currentStatusIndex > stepStatusIndex;
+        final bool isCurrentStep = currentStatusIndex == stepStatusIndex;
 
-        // Color Logic: Green for Completed, Blue for Current
-        final Color circleColor = isCompleted
+        // Color Logic
+        final Color circleColor = isCompletedStep
             ? Colors.green
-            : isCurrent ? Colors.blue : Colors.grey.shade400;
+            : isCurrentStep ? Colors.blue : Colors.grey.shade400;
+            
+        final Color textColor = isCompletedStep || isCurrentStep ? Colors.white70 : Colors.grey.shade400;
+        final Color connectorColor = isCompletedStep ? Colors.green.shade200 : Colors.grey.shade200;
+
 
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -397,7 +425,7 @@ class _OrderTimeline extends StatelessWidget {
                   Container(
                     width: 2,
                     height: 30,
-                    color: isCompleted ? Colors.green.shade200 : Colors.grey.shade200,
+                    color: connectorColor,
                   ),
               ],
             ),
@@ -410,11 +438,18 @@ class _OrderTimeline extends StatelessWidget {
                   _getStepLabel(stepStatus),
                   style: TextStyle(
                     fontSize: 14,
-                    fontWeight: isCompleted || isCurrent ? FontWeight.bold : FontWeight.normal,
-                    color: isCompleted || isCurrent ? Colors.white70 : Colors.grey.shade600,
+                    fontWeight: isCompletedStep || isCurrentStep ? FontWeight.bold : FontWeight.normal,
+                    color: textColor,
                   ),
                 ),
-
+                //if (timestamp != null)
+                  //  Text(
+                  //     DateFormat('h:mm a').format(timestamp),
+                  //     style: TextStyle(
+                  //       fontSize: 12,
+                  //       color: textColor.withOpacity(0.8),
+                  //     ),
+                  // ),
               ],
             ),
           ],

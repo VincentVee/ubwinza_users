@@ -55,6 +55,10 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
   double _driverRadiusKm = 5.0;
   BitmapDescriptor? _vehicleIcon;
 
+  // 1. Distance check constants and flags
+  static const double _arrivedDistanceThresholdKm = 0.05; // 50 meters
+  bool _driverHasArrived = false;
+
   bool get _hasDriverAccepted =>
       _request?.status == 'accepted' || _request?.status == 'in-progress';
 
@@ -170,6 +174,53 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
     return (bearing + 360) % 360; // Normalize to 0-360 degrees
   }
 
+  /// Checks the distance between the accepted driver and the pickup location.
+  void _checkIfDriverIsClose() {
+    // Only proceed if a driver is accepted/in-progress AND we haven't already marked them as arrived.
+    if (!_hasDriverAccepted || _driverHasArrived) {
+      return;
+    }
+
+    // Ensure location data is available
+    final driverLat = _request?.driverLat;
+    final driverLng = _request?.driverLog;
+
+    if (driverLat == null || driverLng == null || (driverLat == 0.0 && driverLng == 0.0)) {
+      return;
+    }
+
+    final driverLocation = LatLng(driverLat, driverLng);
+    final pickupLocation = widget.pickupLatLng;
+
+    // Calculate the distance using your existing helper function
+    final distanceKm = _kmBetween(driverLocation, pickupLocation);
+
+    print('Driver distance to pickup: ${distanceKm.toStringAsFixed(3)} km');
+
+    // Check against the threshold (50 meters)
+    if (distanceKm <= _arrivedDistanceThresholdKm) {
+      debugPrint('*** DRIVER IS WITHIN 50 METERS. TRIGGERING ARRIVED STATUS. ***');
+
+      // 1. Update the local flag
+      setState(() {
+        _driverHasArrived = true;
+      });
+
+      // 2. Update the request status in Firestore
+      // NOTE: This assumes RequestService().updateRequestStatus exists
+      RequestService().updateRequestStatus(
+        widget.requestId, 
+        'arrived', // The new status for the driver reaching the pickup point
+      );
+      
+      // Optional: Show a notification/toast to the user
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your driver has arrived at the pickup location!'), duration: Duration(seconds: 5)),
+      );
+    }
+  }
+
+
   // ---------------------------------------------------------------------------
   // STREAMS
   // ---------------------------------------------------------------------------
@@ -177,6 +228,12 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
   void _listenRequest() {
     RequestService().getRequestStream(widget.requestId).listen((req) {
       if (!mounted) return;
+      
+      // Sync local flag with database status
+      if (req?.status == 'arrived') {
+        _driverHasArrived = true;
+      }
+
       setState(() {
         _request = req;
         // Debug prints to ensure state is changing correctly
@@ -187,6 +244,11 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
         if (_hasDriverAccepted) {
           _updateAcceptedDriverMarker();
           _fetchDriverToPickupRoute();
+          
+          // NEW: Check if the driver is close enough to be considered 'arrived'
+          if (!_driverHasArrived) {
+              _checkIfDriverIsClose();
+          }
         }
       });
     });
@@ -213,11 +275,18 @@ class _RequestMapScreenState extends State<RequestMapScreen> {
     final pickup = widget.pickupLatLng;
 
     _drivers = _allDrivers.where((d) {
+      // 1. Check if the driver is ONLINE using the explicit boolean field
+      if (d.isOnline != true) { // <--- MODIFIED TO USE isOnline
+        return false; 
+      }
+      
+      // 2. Check if the driver is within the specified radius
       final dist = _kmBetween(
         pickup,
         LatLng(d.latitude, d.longitude),
       );
       return dist <= _driverRadiusKm;
+
     }).toList();
 
     // Remove only the *temporary* nearby driver markers
