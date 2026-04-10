@@ -53,6 +53,7 @@ dependencies:
   url_launcher:
   intl:
   flutter_rating_bar:
+  flutter_native_splash: ^2.4.0
 
 
 
@@ -71,6 +72,26 @@ dev_dependencies:
 # following page: https://dart.dev/tools/pub/pubspec
 
 # The following section is specific to Flutter packages.
+  flutter_launcher_icons: "^0.13.1" # Use the latest version
+
+# ⭐ CONFIGURATION BLOCK for flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  # ✅ CORRECTED PATH: Use the path relative to the project root.
+  # Assuming the file is directly inside the 'images' folder.
+  image_path: "images/ubwinza_logo.png"
+
+flutter_native_splash:
+  color: "#1A2B7B"
+  image: images/ubwinza_logo.png
+
+  android_12:
+    color: "#1A2B7B"
+    image: images/ubwinza_logo.png
+
+  ios: true
+  android: true
 flutter:
 
   # The following line ensures that the Material Icons font is

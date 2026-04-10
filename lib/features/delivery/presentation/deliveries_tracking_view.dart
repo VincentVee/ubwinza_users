@@ -222,7 +222,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
     _driverId = widget.deliveryData['driverId'];
     _vehicleType = widget.deliveryData['vehicleType'] ?? 'motorbike';
 
-    debugPrint('🟢 Initializing map with data: ${widget.deliveryData}');
 
     _loadCustomIcons();
     _initializeMapData();
@@ -719,7 +718,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       final response = await http.get(url);
 
       if (response.statusCode != 200) {
-        debugPrint('⚠️ Directions API failed with status code: ${response.statusCode}');
         return _RouteResult(points: const []);
       }
 
@@ -727,7 +725,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       final status = data['status'] as String?;
 
       if (status != 'OK') {
-        debugPrint('⚠️ Directions API status not OK: $status. Error: ${data['error_message']}');
         return _RouteResult(points: const []);
       }
 
@@ -754,7 +751,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
         durationText: duration,
       );
     } catch (e) {
-      debugPrint('🚨 Error fetching directions: $e');
       return _RouteResult(points: const []);
     }
   }

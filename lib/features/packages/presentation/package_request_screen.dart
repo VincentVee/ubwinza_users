@@ -202,20 +202,42 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
   }
 
   String _normalizeZambiaPhone(String input) {
-    final digits = input.replaceAll(RegExp(r'\D'), '');
-    if (digits.startsWith('2609') && digits.length == 12) return '+$digits';
-    if (digits.startsWith('09') && digits.length == 10) return '+260${digits.substring(1)}';
-    if (digits.startsWith('9') && digits.length == 9) return '+260$digits';
-    if (input.startsWith('+2609') && digits.length == 12) return input;
+    // 1. Remove all non-digits (spaces, dashes, etc.)
+    String digits = input.replaceAll(RegExp(r'\D'), '');
+
+    // 2. Handle International/Full format: 260XXXXXXXXX
+    if (digits.startsWith('260') && digits.length == 12) {
+      return '+$digits';
+    }
+
+    // 3. Handle Local format with leading zero: 0XXXXXXXXX
+    if (digits.startsWith('0') && digits.length == 10) {
+      return '+260${digits.substring(1)}';
+    }
+
+    // 4. Handle Raw format (9 digits): 9XXXXXXXX or 7XXXXXXXX
+    if (digits.length == 9 && RegExp(r'^[975]').hasMatch(digits)) {
+      return '+260$digits';
+    }
+
+    // Return original if it doesn't fit a known pattern
     return input;
   }
 
   bool _isValidZambiaPhone(String input) {
-    final digits = input.replaceAll(RegExp(r'\D'), '');
-    if (digits.startsWith('260')) return RegExp(r'^2609\d{8}$').hasMatch(digits);
-    if (digits.startsWith('09')) return RegExp(r'^09\d{8}$').hasMatch(digits);
-    if (digits.startsWith('9')) return RegExp(r'^9\d{8}$').hasMatch(digits);
-    return false;
+    // Clean it up to check only digits
+    String digits = input.replaceAll(RegExp(r'\D'), '');
+
+    // A valid Zambian number must be:
+    // - 12 digits starting with 260
+    // - OR 10 digits starting with 09, 07, or 05
+    // - OR 9 digits starting with 9, 7, or 5
+
+    bool isInternational = digits.startsWith('260') && digits.length == 12;
+    bool isLocal = (digits.startsWith('09') || digits.startsWith('07') || digits.startsWith('05')) && digits.length == 10;
+    bool isShort = (digits.startsWith('9') || digits.startsWith('7') || digits.startsWith('5')) && digits.length == 9;
+
+    return isInternational || isLocal || isShort;
   }
 
   // -------------------- Dynamic Distance Calculation --------------------
@@ -280,7 +302,6 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
         return value;
       }
     } catch (e) {
-      print('Error parsing distance text: $e');
     }
 
     throw Exception('Could not parse distance text: $distanceText');
@@ -318,11 +339,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
     final baseFare = await _fareService.getBaseFare(_vehicleType);
     final pricePerKm = await _fareService.getPricePerKm(_vehicleType);
 
-    print('📏 Using distance: ${_currentDistanceKm.toStringAsFixed(2)} km');
-    print('💰 Base fare: $baseFare, Price per km: $pricePerKm');
-
     final total = (_currentDistanceKm * pricePerKm);//baseFare +
-    print('💵 Total charge: ${total.toStringAsFixed(2)}');
 
     return total;
   }

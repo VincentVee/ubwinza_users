@@ -201,21 +201,16 @@ Future<Map<String, String>> fetchSellerNames(List<String> sellerIds) async {
         String sellerName = '';
         if (businessName.isNotEmpty) {
           sellerName = businessName;
-          print('   ✅ Using businessName: "$sellerName"');
         } else if (restaurantName.isNotEmpty) {
           sellerName = restaurantName;
-          print('   ✅ Using restaurantName: "$sellerName"');
         } else if (name.isNotEmpty) {
           sellerName = name;
-          print('   ✅ Using name: "$sellerName"');
         } else if (displayName.isNotEmpty) {
           sellerName = displayName;
-          print('   ✅ Using displayName: "$sellerName"');
         } else {
           // Generate a default name if all fields are empty
           sellerName = 'Restaurant ${doc.id.substring(0, min(8, doc.id.length))}';
-          print('   ⚠️ ALL fields empty! Using default: "$sellerName"');
-          print('   ⚠️ ACTION REQUIRED: Update seller ${doc.id} with proper business name in Firestore!');
+
         }
         
         sellerNames[doc.id] = sellerName;
@@ -227,14 +222,11 @@ Future<Map<String, String>> fetchSellerNames(List<String> sellerIds) async {
       if (!sellerNames.containsKey(id)) {
         final defaultName = 'Restaurant ${id.substring(0, min(8, id.length))}';
         sellerNames[id] = defaultName;
-        print('⚠️ Seller document missing for ID: $id, using default: "$defaultName"');
       }
     }
 
-    print('✅ fetchSellerNames completed: ${sellerNames.length} sellers');
     return sellerNames;
   } catch (e) {
-    print('❌ Error fetching seller names: $e');
     return {};
   }
 }
