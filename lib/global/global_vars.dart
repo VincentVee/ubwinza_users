@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 Position? position;
 String googleApiKey = "AIzaSyC24a0-yk2HG6ONDtpbPRlL_lWkxeqqQ2Y";
+String termiiApiKey = "TLlFvLmyrKvvrymXoyVUJghXagfTRTEweSiYjvbGBUzXiiOnnzUovDxQRlurSd";
 
 List<Placemark>? placeMark;
 

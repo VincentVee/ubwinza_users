@@ -13,24 +13,55 @@ class ProductDetailsScreen extends StatefulWidget {
   State<ProductDetailsScreen> createState() => _ProductDetailsScreenState();
 }
 
-class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
+class _ProductDetailsScreenState extends State<ProductDetailsScreen>
+    with SingleTickerProviderStateMixin {
   int _qty = 1;
   String? _selectedSize;
   String? _variation;
   final Set<String> _selectedAddons = {};
   bool _isAddingToCart = false;
   bool _isImageLoaded = false;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
 
   @override
   void initState() {
     super.initState();
+
+    // Initialize animations
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 600),
+      vsync: this,
+    );
+
+    _fadeAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOutCubic,
+    );
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _animationController.forward();
+
     if (widget.food.sizes.isNotEmpty) {
       _selectedSize = widget.food.sizes.first['name'];
     }
     _preloadImage();
   }
 
-  // Preload the image
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
   void _preloadImage() {
     final image = NetworkImage(widget.food.imageUrl);
     final stream = image.resolve(const ImageConfiguration());
@@ -50,12 +81,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     );
   }
 
-  // 🧮 Total Price Calculation - FIXED to use exact DB prices
   double _calculateTotalPrice() {
-    // Start with selected size price (EXACT from DB, no modifications)
     double total = _getSelectedSizePrice();
 
-    // Add addons prices
     if (_selectedAddons.isNotEmpty && widget.food.addons != null) {
       for (final addonName in _selectedAddons) {
         final addon = widget.food.addons!.firstWhere(
@@ -68,11 +96,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       }
     }
 
-    // Multiply by quantity at the END
     return total * _qty;
   }
 
-  // 🧩 Helper for selected size price - EXACT from DB
   double _getSelectedSizePrice() {
     if (widget.food.sizes.isEmpty) return widget.food.price;
 
@@ -81,11 +107,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
       orElse: () => {'price': widget.food.price},
     );
 
-    // Return EXACT price from DB, no modifications
     return _safePriceToDouble(selected['price']);
   }
 
-  // 🧩 Helper to safely convert any price value to double
   double _safePriceToDouble(dynamic price) {
     if (price == null) return 0.0;
     if (price is double) return price;
@@ -94,14 +118,12 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     return 0.0;
   }
 
-  // 🛒 Add to Cart with all selections
   Future<void> _addToCart() async {
     setState(() => _isAddingToCart = true);
 
     try {
       final totalPrice = _calculateTotalPrice();
 
-      // Add to cart using your CartProvider with the calculated totalPrice
       Provider.of<CartProvider>(context, listen: false).add(
         widget.food,
         size: _selectedSize,
@@ -111,19 +133,36 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
         qty: _qty,
       );
 
-      // Simulate a brief delay for better UX (remove if not needed)
       await Future.delayed(const Duration(milliseconds: 300));
 
       if (!mounted) return;
 
-      // Show confirmation
+      // Animated snackbar
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Added ${widget.food.name} (${_qty}x) - K${totalPrice.toStringAsFixed(2)} to cart!',
+          content: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.check, color: Colors.white, size: 16),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  '${widget.food.name} (${_qty}x) added to cart',
+                  style: const TextStyle(fontSize: 13, color: Colors.white),
+                ),
+              ),
+            ],
           ),
           duration: const Duration(seconds: 2),
-          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFF6C63FF),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
     } catch (e) {
@@ -133,7 +172,9 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
         SnackBar(
           content: Text('Error adding to cart: $e'),
           duration: const Duration(seconds: 2),
-          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.red.shade600,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
       );
     } finally {
@@ -148,11 +189,84 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
     final f = widget.food;
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(f.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: const Color(0xFF1A2B7B),
-        actions: [
-          CartBadgeIcon(
+      backgroundColor: const Color(0xFFF8F9FF),
+      appBar: _buildPremiumAppBar(),
+      body: !_isImageLoaded
+          ? _buildLoadingState()
+          : FadeTransition(
+        opacity: _fadeAnimation,
+        child: SlideTransition(
+          position: _slideAnimation,
+          child: Column(
+            children: [
+              _buildHeroImageSection(),
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(30),
+                    ),
+                  ),
+                  child: _buildContentSection(),
+                ),
+              ),
+              _buildBottomCartBar(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  PreferredSizeWidget _buildPremiumAppBar() {
+    return AppBar(
+      elevation: 0,
+      backgroundColor: Colors.transparent,
+      leading: Container(
+        margin: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Color(0xFF1A1A2E)),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      title: const Text(
+        'Product Details',
+        style: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF1A1A2E),
+        ),
+      ),
+      centerTitle: true,
+      actions: [
+        Container(
+          margin: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.08),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: CartBadgeIcon(
+            badgeColor: Colors.red,
+            //iconColor: const Color(0xFF6C63FF),
             onPressed: () {
               Navigator.push(
                 context,
@@ -160,300 +274,503 @@ class _ProductDetailsScreenState extends State<ProductDetailsScreen> {
               );
             },
           ),
-          const SizedBox(width: 8),
+        ),
+        const SizedBox(width: 8),
+      ],
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6C63FF).withOpacity(0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const CircularProgressIndicator(
+              color: Color(0xFF6C63FF),
+              strokeWidth: 3,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Loading ${widget.food.name}...',
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: Color(0xFF1A1A2E),
+            ),
+          ),
         ],
       ),
-      body: !_isImageLoaded
-          ? Container(
-        color: const Color(0xFFB8B4B4),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(
-                color: Color(0xFF1A2B7B),
-                strokeWidth: 3,
+    );
+  }
+
+  Widget _buildHeroImageSection() {
+    return Stack(
+      children: [
+        Container(
+          height: 320,
+          width: double.infinity,
+          child: Hero(
+            tag: 'food_${widget.food.id}',
+            child: Image.network(
+              widget.food.imageUrl,
+              width: double.infinity,
+              height: 320,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) => Container(
+                height: 320,
+                color: Colors.grey.shade200,
+                child: const Icon(Icons.restaurant, size: 60, color: Colors.grey),
               ),
-              const SizedBox(height: 16),
-              Text(
-                'Loading ${f.name}...',
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.black87,
+            ),
+          ),
+        ),
+        // Gradient overlay
+        Container(
+          height: 320,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.transparent,
+                Colors.black.withOpacity(0.3),
+                Colors.black.withOpacity(0.6),
+              ],
+            ),
+          ),
+        ),
+        // Rating Badge
+        Positioned(
+          bottom: 20,
+          left: 20,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 8,
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.star, size: 16, color: Color(0xFFFFB800)),
+                const SizedBox(width: 4),
+                Text(
+                  widget.food.rating.toString(),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1A1A2E),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(width: 4, height: 4, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.grey)),
+                const SizedBox(width: 8),
+                const Icon(Icons.access_time, size: 14, color: Colors.grey),
+                const SizedBox(width: 4),
+                Text(
+                  widget.food.prepTime,
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContentSection() {
+    final f = widget.food;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title and Price
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  f.name,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1A1A2E),
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6C63FF).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  "K${_calculateTotalPrice().toStringAsFixed(2)}",
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF6C63FF),
+                  ),
                 ),
               ),
             ],
           ),
-        ),
-      )
-          : Column(
-        children: [
-          // 🍽️ Food Image - STATIC/FIXED
+          const SizedBox(height: 16),
+
+          // Description
           Container(
-            color: const Color(0xFFB8B4B4),
             padding: const EdgeInsets.all(16),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                f.imageUrl,
-                height: 220,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Container(
-                  height: 220,
-                  width: double.infinity,
-                  color: Colors.grey[300],
-                  child: const Icon(Icons.fastfood, size: 60, color: Colors.grey),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Description',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1A1A2E),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 8),
+                Text(
+                  f.description,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey,
+                    height: 1.5,
+                  ),
+                ),
+              ],
             ),
           ),
+          const SizedBox(height: 24),
 
-          // Scrollable Content Below
-          Expanded(
-            child: Container(
-              color: const Color(0xFFB8B4B4),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+          // Sizes Section
+          if (f.sizes.isNotEmpty) ...[
+            _buildSectionHeader('Select Size'),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: f.sizes.map((size) {
+                final name = size['name'] ?? 'Regular';
+                final price = _safePriceToDouble(size['price']);
+                final isSelected = _selectedSize == name;
 
-                    // 📝 Name and Price
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedSize = name),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isSelected ? const Color(0xFF6C63FF) : Colors.white,
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(
+                        color: isSelected ? const Color(0xFF6C63FF) : Colors.grey.shade300,
+                        width: 1.5,
+                      ),
+                      boxShadow: isSelected ? [
+                        BoxShadow(
+                          color: const Color(0xFF6C63FF).withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ] : [],
+                    ),
+                    child: Text(
+                      '$name (K${price.toStringAsFixed(2)})',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isSelected ? Colors.white : const Color(0xFF1A1A2E),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 24),
+          ],
+
+          // Variations Section
+          if (f.variations != null && f.variations!.isNotEmpty) ...[
+            _buildSectionHeader('Choose Variation'),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: f.variations!.map((v) {
+                final isSelected = _variation == v;
+                return GestureDetector(
+                  onTap: () => setState(() {
+                    _variation = isSelected ? null : v;
+                  }),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isSelected ? const Color(0xFF6C63FF) : Colors.white,
+                      borderRadius: BorderRadius.circular(30),
+                      border: Border.all(
+                        color: isSelected ? const Color(0xFF6C63FF) : Colors.grey.shade300,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Text(
+                      v,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isSelected ? Colors.white : const Color(0xFF1A1A2E),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+            const SizedBox(height: 24),
+          ],
+
+          // Addons Section
+          if (f.addons != null && f.addons!.isNotEmpty) ...[
+            _buildSectionHeader('Add-ons'),
+            const SizedBox(height: 12),
+            ...f.addons!.map((addon) {
+              final name = addon['name'] ?? 'Unnamed';
+              final price = _safePriceToDouble(addon['price']);
+              final isSelected = _selectedAddons.contains(name);
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (isSelected) {
+                        _selectedAddons.remove(name);
+                      } else {
+                        _selectedAddons.add(name);
+                      }
+                    });
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isSelected ? const Color(0xFF6C63FF).withOpacity(0.05) : Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isSelected ? const Color(0xFF6C63FF) : Colors.grey.shade200,
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
                       children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: isSelected ? const Color(0xFF6C63FF) : Colors.white,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: isSelected ? const Color(0xFF6C63FF) : Colors.grey.shade400,
+                              width: 2,
+                            ),
+                          ),
+                          child: isSelected
+                              ? const Icon(Icons.check, size: 14, color: Colors.white)
+                              : null,
+                        ),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            f.name,
-                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
+                            name,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: Color(0xFF1A1A2E),
+                            ),
                           ),
                         ),
                         Text(
-                          "K${_calculateTotalPrice().toStringAsFixed(2)}",
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
-                    // ⭐ Rating and Prep Info
-                    Row(
-                      children: [
-                        Icon(Icons.star, color: Colors.amber.shade700, size: 20),
-                        Text(f.rating.toString(), style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black)),
-                        const SizedBox(width: 10),
-                        const Icon(Icons.timer_outlined, size: 18, color: Colors.black),
-                        const SizedBox(width: 4),
-                        Text(f.prepTime, style: const TextStyle(color: Colors.black)),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-
-                    // 🧂 Description
-                    Text(
-                      f.description,
-                      style: const TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // 📏 Sizes (Dynamic) - Shows EXACT price from DB
-                    if (f.sizes.isNotEmpty) ...[
-                      const Text('Size',
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.black)),
-                      const SizedBox(height: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: f.sizes.map((size) {
-                          final name = size['name'] ?? 'Regular';
-                          final price = _safePriceToDouble(size['price']);
-                          final selected = _selectedSize == name;
-
-                          return RadioListTile<String>(
-                            value: name,
-                            groupValue: _selectedSize,
-                            onChanged: (value) {
-                              setState(() {
-                                _selectedSize = value;
-                              });
-                            },
-                            activeColor: const Color(0xFF1A2B7B),
-                            title: Text('$name (K${price.toStringAsFixed(2)})',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: selected ? const Color(0xFF1A2B7B) : Colors.black87,
-                                )),
-                            controlAffinity: ListTileControlAffinity.leading,
-                            contentPadding: EdgeInsets.zero,
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-
-                    // 🧁 Variations (Dynamic, if any)
-                    if (f.variations != null && f.variations!.isNotEmpty) ...[
-                      const Text('Variation',
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.black)),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 10,
-                        children: f.variations!.map((v) {
-                          final selected = _variation == v;
-                          return ChoiceChip(
-                            label: Text(
-                              v,
-                              style: TextStyle(
-                                color: selected ? Colors.white : Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            selected: selected,
-                            selectedColor: const Color(0xFF1A2B7B),
-                            onSelected: (_) => setState(() {
-                              _variation = selected ? null : v;
-                            }),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-
-                    // 🧩 Addons (Dynamic)
-                    if (f.addons != null && f.addons!.isNotEmpty) ...[
-                      const Text('Add-ons',
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.black)),
-                      const SizedBox(height: 8),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: f.addons!.map((addon) {
-                          final name = addon['name'] ?? 'Unnamed';
-                          final price = _safePriceToDouble(addon['price']);
-                          final selected = _selectedAddons.contains(name);
-
-                          return CheckboxListTile(
-                            value: selected,
-                            onChanged: (_) {
-                              setState(() {
-                                if (selected) {
-                                  _selectedAddons.remove(name);
-                                } else {
-                                  _selectedAddons.add(name);
-                                }
-                              });
-                            },
-                            activeColor: const Color(0xFF1A2B7B),
-                            checkColor: Colors.white,
-                            title: Text('$name (+K${price.toStringAsFixed(2)})',
-                                style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.black)),
-                            controlAffinity: ListTileControlAffinity.leading,
-                            contentPadding: EdgeInsets.zero,
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 16),
-                    ],
-
-                    // ➕ Quantity Selector
-                    const Text('Quantity',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.black)),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.start,
-                      children: [
-                        Container(
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.black),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            children: [
-                              IconButton(
-                                icon: Icon(Icons.remove, color: _qty > 1 ? Colors.black : Colors.grey),
-                                onPressed: _qty > 1
-                                    ? () => setState(() => _qty--)
-                                    : null,
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 16),
-                                child: Text(
-                                  _qty.toString(),
-                                  style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black
-                                  ),
-                                ),
-                              ),
-                              IconButton(
-                                icon: const Icon(Icons.add, color: Colors.black),
-                                onPressed: () => setState(() => _qty++),
-                              ),
-                            ],
+                          '+K${price.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF6C63FF),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 100),
-                  ],
+                  ),
                 ),
-              ),
+              );
+            }).toList(),
+            const SizedBox(height: 24),
+          ],
+
+          // Quantity Selector
+          _buildSectionHeader('Quantity'),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.grey.shade50,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.remove, color: _qty > 1 ? const Color(0xFF6C63FF) : Colors.grey),
+                  onPressed: _qty > 1 ? () => setState(() => _qty--) : null,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+                Container(
+                  width: 50,
+                  child: Text(
+                    _qty.toString(),
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A2E),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add, color: Color(0xFF6C63FF)),
+                  onPressed: () => setState(() => _qty++),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
             ),
           ),
+          const SizedBox(height: 100),
+        ],
+      ),
+    );
+  }
 
-          // 🛒 Add to Cart Button - FIXED AT BOTTOM
-          Container(
-            color: const Color(0xFFB8B4B4),
-            padding: const EdgeInsets.all(16),
-            child: SafeArea(
-              child: SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1A2B7B),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                  ),
-                  onPressed: _isAddingToCart ? null : _addToCart,
-                  child: _isAddingToCart
-                      ? const SizedBox(
-                    height: 24,
-                    width: 24,
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                      strokeWidth: 2.5,
-                    ),
-                  )
-                      : Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.shopping_cart_outlined, color: Colors.white),
-                          SizedBox(width: 8),
-                          Text(
-                            'Add to Cart',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-                          ),
-                        ],
-                      ),
-                      Text(
-                        'K${_calculateTotalPrice().toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+  Widget _buildSectionHeader(String title) {
+    return Row(
+      children: [
+        Container(
+          width: 4,
+          height: 20,
+          decoration: BoxDecoration(
+            color: const Color(0xFF6C63FF),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF1A1A2E),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBottomCartBar() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, -4),
           ),
         ],
+      ),
+      child: SafeArea(
+        child: Row(
+          children: [
+            // Total Price
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Total Price',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'K${_calculateTotalPrice().toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF6C63FF),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            // Add to Cart Button
+            Expanded(
+              child: ElevatedButton(
+                onPressed: _isAddingToCart ? null : _addToCart,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF6C63FF),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 0,
+                ),
+                child: _isAddingToCart
+                    ? const SizedBox(
+                  height: 24,
+                  width: 24,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2.5,
+                  ),
+                )
+                    : const Text(
+                  'Add to Cart',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

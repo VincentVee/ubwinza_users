@@ -511,10 +511,10 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
       final prefs = sharedPreferences;
       final String? userId = prefs?.getString("uid");
       final String? userName = prefs?.getString("name");
-      final String? userImage = prefs?.getString("imageUrl");
+      final String? userImage = prefs?.getString("imageUrl") ?? '';
       final String? userPhone = prefs?.getString("phone");
 
-      if (userId == null || userName == null || userImage == null) {
+      if (userId == null || userName == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('User info missing. Please login again.')),
         );
@@ -574,7 +574,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
 
   @override
   Widget build(BuildContext context) {
-    const themeColor = Color(0xFF1A2B7B);
+    const themeColor = Color(0xFF6C63FF);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
     return Container(
@@ -856,7 +856,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
                     children: [
                       IconButton(
                         tooltip: 'Pick on map',
-                        icon: const Icon(Icons.map_outlined, color: Color(0xFF1A2B7B)),
+                        icon: const Icon(Icons.map_outlined, color: Color(0xFF6C63FF)),
                         onPressed: () => _pickAddress(isPickup),
                       ),
                       IconButton(
@@ -881,7 +881,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
                   fillColor: Colors.white,
                   border: const UnderlineInputBorder(),
                   focusedBorder: const UnderlineInputBorder(
-                    borderSide: BorderSide(color: Color(0xFF1A2B7B)),
+                    borderSide: BorderSide(color: Color(0xFF6C63FF)),
                   ),
                 ),
               );
@@ -908,7 +908,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
               style: const TextStyle(fontSize: 16, color: Colors.black),
             ),
           ),
-          IconButton(icon: const Icon(Icons.edit, color: Color(0xFF1A2B7B)), onPressed: onEdit),
+          IconButton(icon: const Icon(Icons.edit, color: Color(0xFF6C63FF)), onPressed: onEdit),
         ],
       ),
     );
@@ -930,7 +930,7 @@ class _PackageRequestModalState extends State<PackageRequestModal> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.person_outline, color: Color(0xFF1A2B7B)),
+            icon: const Icon(Icons.person_outline, color: Color(0xFF6C63FF)),
             onPressed: () => _pickContact(controller),
           ),
         ],
@@ -1161,7 +1161,7 @@ class _ContactListBottomSheetState extends State<_ContactListBottomSheet> {
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
       decoration: const BoxDecoration(
-        color: Color(0xFF1A2B7B),
+        color: Color(0xFF6C63FF),
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
@@ -1236,7 +1236,7 @@ class _ContactListBottomSheetState extends State<_ContactListBottomSheet> {
                   ),
                   child: ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: const Color(0xFF1A2B7B),
+                      backgroundColor: const Color(0xFF6C63FF),
                       child: Text(
                         name[0].toUpperCase(),
                         style: const TextStyle(color: Colors.white),
@@ -1275,7 +1275,7 @@ class _ContactListBottomSheetState extends State<_ContactListBottomSheet> {
               child: ElevatedButton(
                 onPressed: () => Navigator.pop(context),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.grey[800],
+                  backgroundColor: Colors.red,
                   foregroundColor: Colors.white,
                   minimumSize: const Size(double.infinity, 52),
                   shape: RoundedRectangleBorder(

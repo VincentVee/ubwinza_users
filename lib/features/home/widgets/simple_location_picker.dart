@@ -223,7 +223,7 @@ class _SimpleLocationPickerScreenState extends State<SimpleLocationPickerScreen>
               16,
               mediaQuery.padding.bottom + 16,
             ),
-            color: Color(0xFF1A2B7B),
+            color: Color(0xFF6C63FF),
             child: ElevatedButton.icon(
               onPressed: _hasLocation ? _onConfirm : null,
               icon: const Icon(Icons.check),
@@ -245,7 +245,7 @@ class _SimpleLocationPickerScreenState extends State<SimpleLocationPickerScreen>
     return Container(
       height: 60,
       decoration: const BoxDecoration(
-        color: Color(0xFF1A2B7B),
+        color: Color(0xFF6C63FF),
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 16),

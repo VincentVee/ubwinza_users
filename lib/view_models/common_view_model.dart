@@ -32,7 +32,7 @@ class CommonViewModel {
 
   showSnackBar(String message, BuildContext context) {
 
-    final snackBar = SnackBar(content: Text(message));
+    final snackBar = SnackBar(content: Text(message),backgroundColor: Colors.green,);
     ScaffoldMessenger.of(context).showSnackBar(snackBar);
 
   }

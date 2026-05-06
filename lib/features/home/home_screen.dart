@@ -119,7 +119,7 @@ class _UserHomeScreenState extends State<UserHomeScreen> {
   Widget _profileMenu(BuildContext context) {
 
     return PopupMenuButton<String>(
-      color: Color(0xFF020A30),
+      color: Color(0xFF6C63FF),
       onSelected: (value) {
         if (value == 'profile') {
           Navigator.push(

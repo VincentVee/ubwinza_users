@@ -315,7 +315,7 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Send a Package'),
-        backgroundColor: Color(0xFF1A2B7B),
+        backgroundColor: Color(0xFF6C63FF),
         foregroundColor: Colors.white,
       ),
       extendBody: true,
@@ -526,7 +526,7 @@ class _PackageCreateScreenState extends State<PackageCreateScreen> {
                             }
                                 : null,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Color(0xFF1A2B7B),
+                              backgroundColor: Color(0xFF6C63FF),
                               disabledBackgroundColor: Colors.black12,
                               foregroundColor: Colors.white,
                               minimumSize: const Size(double.infinity, 52),
@@ -714,7 +714,7 @@ class _FragileSwitch extends StatelessWidget {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: Color(0xFF1A2B7B),
+            activeColor: Color(0xFF6C63FF),
           ),
         ],
       ),

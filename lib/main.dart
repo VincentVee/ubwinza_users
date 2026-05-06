@@ -1,5 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,13 +13,24 @@ import 'core/bootstrap/app_bootstrap.dart';
 import 'core/models/location_model.dart';
 import 'features/food/state/cart_provider.dart';
 import 'global/global_vars.dart';
-// IMPORTANT: Add the missing LocationViewModel import
 // ------------------------------------
-
 
 Future<void> main() async {
   // 1. Ensure Flutter binding is initialized first (CRUCIAL)
   WidgetsFlutterBinding.ensureInitialized();
+
+  // =======================================================
+  // *** FIX: Set Status Bar Style Globally ***
+  // =======================================================
+  // This ensures the status bar has dark icons (black) for light backgrounds
+  // and proper styling throughout the app
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.dark, // Black icons for light backgrounds
+    statusBarBrightness: Brightness.light,
+    systemNavigationBarColor: Colors.white,
+    systemNavigationBarIconBrightness: Brightness.dark,
+  ));
 
   // 2. Initialize platform/package dependencies
   await Firebase.initializeApp();
@@ -53,7 +65,6 @@ Future<void> main() async {
         // =======================================================
         ChangeNotifierProvider(create: (_) => LocationViewModel()),
         ChangeNotifierProvider(create: (_) => AuthViewModel()),
-
       ],
       child: const MyApp(),
     ),
@@ -63,14 +74,30 @@ Future<void> main() async {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Ubwinza Users App',
-      theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: Colors.black,
+      theme: ThemeData(
+        brightness: Brightness.light,
+        primarySwatch: Colors.blue,
+        scaffoldBackgroundColor: const Color(0xFFF8F9FF),
+        appBarTheme: const AppBarTheme(
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          systemOverlayStyle: SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.dark,
+            statusBarBrightness: Brightness.light,
+          ),
+          iconTheme: IconThemeData(color: Colors.white),
+          titleTextStyle: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ),
       home: const MySplashScreen(),
     );

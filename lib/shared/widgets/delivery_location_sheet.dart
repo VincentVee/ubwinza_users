@@ -3,9 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geocoding/geocoding.dart';
 
-// You will need to import your chosen Places package here, e.g.:
-// import 'package:flutter_google_places/flutter_google_places.dart';
-
 class DeliveryLocationResult {
   final LatLng latLng;
   final String? address;
@@ -21,7 +18,7 @@ Future<DeliveryLocationResult?> showDeliveryLocationSheet({
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     isDismissible: true,
-    enableDrag: true, // Allow standard dragging for better responsiveness
+    enableDrag: true,
     builder: (_) => _DeliveryLocationSheet(initialTarget: initialTarget),
   );
 }
@@ -35,39 +32,48 @@ class _DeliveryLocationSheet extends StatefulWidget {
 }
 
 class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {  // Changed from SingleTickerProviderStateMixin
   GoogleMapController? _mapController;
-
   LatLng? _currentPosition;
   CameraPosition? _initialCameraPosition;
-
-  String _address = 'Move the map or search above to select location';
+  String _address = 'Move the map to select location';
   bool _isLoadingAddress = false;
   bool _isDragging = false;
   bool _hasSelectedLocation = false;
 
   late AnimationController _pinAnimationController;
   late Animation<double> _pinAnimation;
+  late AnimationController _bounceController;
 
   Timer? _debounceTimer;
+  TextEditingController _searchController = TextEditingController();
+  List<dynamic> _searchPredictions = [];
+  bool _isSearching = false;
+  bool _showSearchResults = false;
 
-  static const _zambiaCenter = LatLng(-13.435, 27.849);
-  static const _debounceDuration = Duration(milliseconds: 600);
+  static const _zambiaCenter = LatLng(-15.3875, 28.3228); // Lusaka
+  static const _debounceDuration = Duration(milliseconds: 500);
 
   @override
   void initState() {
     super.initState();
     _initializeData();
 
+    // Initialize animation controllers with proper vsync
     _pinAnimationController = AnimationController(
-      duration: const Duration(milliseconds: 150),
+      duration: const Duration(milliseconds: 200),
       vsync: this,
     );
 
-    _pinAnimation = Tween<double>(begin: 0, end: -20).animate(
+    _bounceController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
+    _pinAnimation = Tween<double>(begin: 0, end: -25).animate(
       CurvedAnimation(
         parent: _pinAnimationController,
-        curve: Curves.easeOut,
+        curve: Curves.easeOutCubic,
       ),
     );
   }
@@ -76,7 +82,7 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     _currentPosition = widget.initialTarget ?? _zambiaCenter;
     _initialCameraPosition = CameraPosition(
       target: _currentPosition!,
-      zoom: widget.initialTarget != null ? 15 : 5,
+      zoom: widget.initialTarget != null ? 16 : 13,
     );
     _hasSelectedLocation = widget.initialTarget != null;
     if (_hasSelectedLocation) {
@@ -88,80 +94,84 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
   void dispose() {
     _debounceTimer?.cancel();
     _pinAnimationController.dispose();
+    _bounceController.dispose();
     _mapController?.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
-  // ==================== SEARCH INTEGRATION POINT ====================
-
-  /// Placeholder for calling the external Places Autocomplete search.
-  Future<void> _showPlacesSearch() async {
-    // ⚠️ IMPORTANT: IMPLEMENT THIS METHOD
-    // You will need a package like 'flutter_google_places' or 'map_location_picker'.
-
-    // Example using a hypothetical package:
-    /*
-    final prediction = await PlacesAutocomplete.show(
-      context: context,
-      apiKey: 'YOUR_PLACES_API_KEY',
-      mode: Mode.overlay, // or Mode.fullscreen
-      language: 'en',
-      components: [Component(Component.country, 'zm')], // Bias results to Zambia
-    );
-
-    if (prediction != null) {
-      await _handleSearchSelection(prediction);
+  Future<void> _searchPlaces(String query) async {
+    if (query.isEmpty) {
+      setState(() {
+        _searchPredictions = [];
+        _showSearchResults = false;
+      });
+      return;
     }
-    */
 
-    // --- TEMPORARY Mock for demonstration ---
-    final mockResult = DeliveryLocationResult(
-        const LatLng(-15.4167, 28.2833), // Lusaka Mock
-        address: 'Lusaka Main Mall'
-    );
-    if (mockResult != null) {
-      _handleSearchSelection(mockResult.latLng, mockResult.address);
+    setState(() {
+      _isSearching = true;
+    });
+
+    try {
+      final predictions = await locationFromAddress('$query, Zambia');
+
+      setState(() {
+        _searchPredictions = predictions;
+        _showSearchResults = true;
+        _isSearching = false;
+      });
+    } catch (e) {
+      debugPrint("Search error: $e");
+      setState(() {
+        _searchPredictions = [];
+        _isSearching = false;
+      });
     }
-    // --- END TEMPORARY Mock ---
   }
 
-  /// Handles the result from the Places search and updates the map/state.
-  Future<void> _handleSearchSelection(LatLng latLng, String? address) async {
-    _currentPosition = latLng;
-    // Animate the camera to the selected location
-    _mapController?.animateCamera(
+  void _onSearchChanged(String value) {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(_debounceDuration, () {
+      _searchPlaces(value);
+    });
+  }
+
+  Future<void> _selectSearchResult(dynamic result) async {
+    final location = result as Location;
+    final latLng = LatLng(location.latitude, location.longitude);
+
+    setState(() {
+      _currentPosition = latLng;
+      _showSearchResults = false;
+      _searchController.clear();
+      _isLoadingAddress = true;
+      _hasSelectedLocation = true;
+    });
+
+    await _mapController?.animateCamera(
       CameraUpdate.newCameraPosition(
         CameraPosition(target: latLng, zoom: 17),
       ),
     );
 
-    // Manually set the address from the Autocomplete result (faster than Geocoding)
-    if (mounted) {
-      setState(() {
-        _address = address ?? 'Selected from Search';
-        _hasSelectedLocation = true;
-        _isLoadingAddress = false;
-      });
-    }
+    await _getAddressFromLatLng(latLng);
   }
-
-
-  // ==================== GEOCODING & MAP HANDLERS (Optimized) ====================
 
   Future<void> _getAddressFromLatLng(LatLng position, {bool isInitial = false}) async {
     if (_isLoadingAddress && !isInitial) return;
-
     if (!mounted) return;
+
     setState(() {
       _isLoadingAddress = true;
-      _address = 'Getting address...';
+      _address = 'Getting address details...';
     });
 
     try {
       final List<Placemark> placemarks = await placemarkFromCoordinates(
         position.latitude,
         position.longitude,
-      ).timeout(const Duration(seconds: 5));
+      ).timeout(const Duration(seconds: 8));
 
       if (!mounted) return;
 
@@ -182,33 +192,29 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     } on TimeoutException {
       if (!mounted) return;
       setState(() {
-        _address = 'Address lookup timed out.';
+        _address = 'Address lookup timed out. Please try again.';
         _isLoadingAddress = false;
-        _hasSelectedLocation = true;
       });
     } catch (e) {
       debugPrint("Geocoding Error: $e");
       if (!mounted) return;
       setState(() {
-        _address = 'Unable to get address (Error)';
+        _address = 'Unable to get address. Please try again.';
         _isLoadingAddress = false;
-        _hasSelectedLocation = true;
       });
     }
   }
 
   String _formatAddress(Placemark place) {
     final List<String> parts = [
+      if (place.name?.isNotEmpty == true && place.name != place.street) place.name!,
       if (place.street?.isNotEmpty == true) place.street!,
       if (place.subLocality?.isNotEmpty == true) place.subLocality!,
       if (place.locality?.isNotEmpty == true) place.locality!,
-      if (place.administrativeArea?.isNotEmpty == true && place.administrativeArea != place.locality)
-        place.administrativeArea!,
     ];
 
-    final uniqueParts = parts.toSet().toList();
-
-    return uniqueParts.isEmpty ? place.name ?? 'Selected Location' : uniqueParts.join(', ');
+    final uniqueParts = parts.where((p) => p.isNotEmpty).toSet().toList();
+    return uniqueParts.isEmpty ? 'Selected Location' : uniqueParts.take(3).join(', ');
   }
 
   void _onMapCreated(GoogleMapController controller) {
@@ -217,13 +223,8 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
 
   void _onCameraMove(CameraPosition position) {
     _currentPosition = position.target;
-
     if (!_isDragging) {
-      if (mounted) {
-        setState(() {
-          _isDragging = true;
-        });
-      }
+      setState(() => _isDragging = true);
       if (!_pinAnimationController.isAnimating) {
         _pinAnimationController.forward();
       }
@@ -235,14 +236,9 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
       _pinAnimationController.reverse();
     }
 
-    if (mounted) {
-      setState(() {
-        _isDragging = false;
-      });
-    }
+    setState(() => _isDragging = false);
 
     _debounceTimer?.cancel();
-
     _debounceTimer = Timer(_debounceDuration, () {
       if (_currentPosition != null && mounted) {
         _getAddressFromLatLng(_currentPosition!);
@@ -250,10 +246,13 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     });
   }
 
-  void _onMyLocationPressed() {
+  void _onMyLocationPressed() async {
     if (_mapController != null && _currentPosition != null) {
-      _mapController!.animateCamera(
-        CameraUpdate.newLatLng(_currentPosition!),
+      _bounceController.forward().then((_) => _bounceController.reverse());
+      await _mapController!.animateCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(target: _currentPosition!, zoom: 16),
+        ),
       );
     }
   }
@@ -274,11 +273,121 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     Navigator.pop(context);
   }
 
-  // ==================== WIDGET BUILDERS ====================
+  Widget _buildSearchBar() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      margin: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(_showSearchResults ? 16 : 30),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.12),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          TextField(
+            controller: _searchController,
+            onChanged: _onSearchChanged,
+            onTap: () => setState(() => _showSearchResults = true),
+            decoration: InputDecoration(
+              hintText: 'Search for area, street, or landmark...',
+              hintStyle: TextStyle(color: Colors.grey.shade400),
+              prefixIcon: Icon(Icons.search, color: const Color(0xFF6C63FF)),
+              suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                icon: Icon(Icons.clear, color: Colors.grey.shade400),
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() {
+                    _searchPredictions = [];
+                    _showSearchResults = false;
+                  });
+                },
+              )
+                  : null,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(_showSearchResults ? 16 : 30),
+                borderSide: BorderSide.none,
+              ),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+          if (_showSearchResults && _searchPredictions.isNotEmpty)
+            Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.4,
+              ),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: _searchPredictions.length,
+                itemBuilder: (context, index) {
+                  final location = _searchPredictions[index];
+                  return InkWell(
+                    onTap: () => _selectSearchResult(location),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.location_on, size: 18, color: const Color(0xFF6C63FF)),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  location.featureName ?? location.locality ?? 'Location',
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: Color(0xFF1A1A2E),
+                                  ),
+                                ),
+                                if (location.locality != null)
+                                  Text(
+                                    location.locality!,
+                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          if (_isSearching && _showSearchResults)
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _buildMapWidget() {
     if (_initialCameraPosition == null) {
-      return const Center(child: CircularProgressIndicator());
+      return Container(
+        color: Colors.grey.shade100,
+        child: const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
     }
 
     return GoogleMap(
@@ -290,7 +399,8 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
       myLocationButtonEnabled: false,
       zoomControlsEnabled: false,
       mapToolbarEnabled: false,
-      minMaxZoomPreference: const MinMaxZoomPreference(5, 20),
+      minMaxZoomPreference: const MinMaxZoomPreference(10, 20),
+      padding: const EdgeInsets.only(bottom: 100),
     );
   }
 
@@ -305,23 +415,47 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6C63FF),
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF6C63FF).withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      _isDragging ? '📍 Drop here' : '📍 Drag to move',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
                   Icon(
                     Icons.location_pin,
-                    size: 50,
-                    color: _isLoadingAddress ? Colors.grey : const Color(0xFFFF5A3D),
+                    size: 48,
+                    color: const Color(0xFF6C63FF),
                     shadows: const [
                       Shadow(
-                        blurRadius: 4,
+                        blurRadius: 8,
                         color: Colors.black26,
+                        offset: Offset(0, 2),
                       ),
                     ],
                   ),
                   Container(
                     margin: const EdgeInsets.only(top: 2),
-                    width: 20,
+                    width: 24,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.2),
+                      color: Colors.black.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
@@ -334,59 +468,29 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
     );
   }
 
-  // NEW: Search Bar Widget
-  Widget _buildSearchBar() {
-    return InkWell(
-      onTap: _showPlacesSearch, // Tapping opens the search screen
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        margin: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.15),
-              blurRadius: 8,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.search, color: Colors.grey, size: 24),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Search for a location or address...',
-                style: TextStyle(
-                  color: Colors.grey[600],
-                  fontSize: 16,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildAddressSection() {
-    // ... (No changes here, remains the same as previous response) ...
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
+        color: const Color(0xFFF8F9FF),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF6C63FF).withOpacity(0.2)),
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.location_on,
-            color: _isLoadingAddress ? Colors.grey : const Color(0xFFFF5A3D),
-            size: 20,
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6C63FF).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              Icons.location_on,
+              color: _isLoadingAddress ? Colors.grey : const Color(0xFF6C63FF),
+              size: 20,
+            ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           Expanded(
             child: _isLoadingAddress
                 ? Row(
@@ -395,30 +499,36 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(
-                    key: ValueKey('address_loading'),
                     strokeWidth: 2,
-                    color: Color(0xFFFF5A3D),
+                    color: Color(0xFF6C63FF),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Text(
                   _address,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    color: Colors.black54,
-                  ),
+                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                 ),
               ],
             )
-                : Text(
-              _address,
-              style: const TextStyle(
-                fontSize: 14,
-                color: Colors.black87,
-                fontWeight: FontWeight.w500,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+                : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Selected Location',
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  _address,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF1A1A2E),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
           ),
         ],
@@ -427,23 +537,33 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
   }
 
   Widget _buildConfirmButton() {
-    final bool isButtonEnabled =
-        _currentPosition != null && !_isLoadingAddress && _hasSelectedLocation;
-    final Color buttonColor =
-    isButtonEnabled ? const Color(0xFFFF5A3D) : Colors.grey;
+    final bool isButtonEnabled = _currentPosition != null && !_isLoadingAddress && _hasSelectedLocation;
 
-    return ElevatedButton.icon(
-      onPressed: isButtonEnabled ? _onConfirmPressed : null,
-      icon: const Icon(Icons.check_circle_outline),
-      label: const Text('Confirm Location'),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: buttonColor,
-        foregroundColor: Colors.white,
-        minimumSize: const Size(double.infinity, 52),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      child: ElevatedButton(
+        onPressed: isButtonEnabled ? _onConfirmPressed : null,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF6C63FF),
+          disabledBackgroundColor: Colors.grey.shade300,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(double.infinity, 52),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          elevation: isButtonEnabled ? 2 : 0,
         ),
-        elevation: 2,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.check_circle_outline, size: 20),
+            const SizedBox(width: 8),
+            const Text(
+              'Confirm Delivery Location',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -451,90 +571,106 @@ class _DeliveryLocationSheetState extends State<_DeliveryLocationSheet>
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: MediaQuery.of(context).size.height * 0.85,
+      height: MediaQuery.of(context).size.height * 0.9,
       decoration: const BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: Column(
         children: [
+          // Drag handle
           Container(
             margin: const EdgeInsets.only(top: 12, bottom: 8),
-            width: 40,
+            width: 50,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.grey[300],
+              color: Colors.grey.shade300,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-
+          // Header
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: Row(
               children: [
-                const Text(
-                  'Choose delivery location',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.black,
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6C63FF).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.location_searching, size: 20, color: Color(0xFF6C63FF)),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'Choose Delivery Location',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF1A1A2E),
+                    ),
                   ),
                 ),
-                const Spacer(),
                 IconButton(
-                  icon: const Icon(Icons.close, size: 24),
+                  icon: const Icon(Icons.close, size: 24, color: Color(0xFF1A1A2E)),
                   onPressed: _onClosePressed,
                 ),
               ],
             ),
           ),
-
-          const Divider(height: 1),
-
-          // Map section with Search Bar overlay
+          const Divider(height: 1, color: Color(0xFFF0F0F0)),
+          // Map section with search overlay
           Expanded(
             child: Stack(
               children: [
-                _buildMapWidget(), // GoogleMap
-
-                // NEW: Search Bar Positioned at the top
+                _buildMapWidget(),
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
                   child: _buildSearchBar(),
                 ),
-
                 Positioned(
                   right: 16,
-                  bottom: 16,
-                  child: FloatingActionButton.small(
-                    onPressed: _onMyLocationPressed,
-                    backgroundColor: Colors.white,
-                    child: const Icon(
-                      Icons.my_location,
-                      color: Color(0xFFFF5A3D),
-                      size: 20,
-                    ),
+                  bottom: 100,
+                  child: AnimatedBuilder(
+                    animation: _bounceController,
+                    builder: (context, child) {
+                      return Transform.scale(
+                        scale: 1 + (_bounceController.value * 0.1),
+                        child: FloatingActionButton(
+                          onPressed: _onMyLocationPressed,
+                          backgroundColor: Colors.white,
+                          mini: true,
+                          elevation: 2,
+                          child: const Icon(
+                            Icons.my_location,
+                            color: Color(0xFF6C63FF),
+                            size: 20,
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ),
-                _buildPinWidget(), // Location Pin
+                _buildPinWidget(),
               ],
             ),
           ),
-
           // Bottom section
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               color: Colors.white,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.1),
-                  blurRadius: 10,
-                  offset: const Offset(0, -2),
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 20,
+                  offset: const Offset(0, -4),
                 ),
               ],
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: SafeArea(
               top: false,

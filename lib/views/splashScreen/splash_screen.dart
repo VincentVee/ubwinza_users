@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:ubwinza_users/features/home/home_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ubwinza_users/features/home/professional_home_screen.dart';
 
 import '../../global/global_instances.dart';
 import '../../global/global_vars.dart';
@@ -25,7 +25,7 @@ class _MySplashScreenState extends State<MySplashScreen>
   void initState() {
     super.initState();
 
-    // 🔥 Animation setup
+    // Animation setup
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 2),
@@ -41,55 +41,35 @@ class _MySplashScreenState extends State<MySplashScreen>
 
   void startTimer() {
     Timer(const Duration(seconds: 3), () async {
+      // Check if user is logged in via SharedPreferences
       final String? uid = sharedPreferences?.getString("uid");
       final String? name = sharedPreferences?.getString("name");
-      final String? email = sharedPreferences?.getString("email");
+      final String? phone = sharedPreferences?.getString("phone");
 
-      if (uid != null && name != null && email != null) {
+
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (c) => UserHomeScreen()),
+          MaterialPageRoute(builder: (c) => const ProfessionalHomeScreen()),
         );
-      } else if (FirebaseAuth.instance.currentUser != null) {
-        await _reloadUserData();
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (c) => AuthScreen()),
-        );
-      }
+
+      // if (uid != null && name != null && phone != null) {
+      //   // User is logged in - go to home
+      //   if (mounted) {
+      //     Navigator.pushReplacement(
+      //       context,
+      //       MaterialPageRoute(builder: (c) => const ProfessionalHomeScreen()),
+      //     );
+      //   }
+      // } else {
+      //   // User not logged in - go to auth screen
+      //   if (mounted) {
+      //     Navigator.pushReplacement(
+      //       context,
+      //       MaterialPageRoute(builder: (c) => const AuthScreen()),
+      //     );
+      //   }
+      //}
     });
-  }
-
-  Future<void> _reloadUserData() async {
-    try {
-      final currentUser = FirebaseAuth.instance.currentUser;
-
-      if (currentUser != null) {
-        final success =
-        await authViewModel.readDataFromFirestoreAndSetDataLocally(
-          currentUser,
-          context,
-        );
-
-        if (success && mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (c) => UserHomeScreen()),
-          );
-        } else {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (c) => AuthScreen()),
-          );
-        }
-      }
-    } catch (e) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (c) => AuthScreen()),
-      );
-    }
   }
 
   @override
@@ -101,7 +81,7 @@ class _MySplashScreenState extends State<MySplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1A2B7B), // 🔥 brand color
+      backgroundColor: const Color(0xFF1A2B7B),
       body: Center(
         child: FadeTransition(
           opacity: _fade,
@@ -110,18 +90,32 @@ class _MySplashScreenState extends State<MySplashScreen>
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-
-                // 🔥 LOGO
+                // Logo
                 Image.asset(
                   "images/ubwinza_logo.png",
                   width: 140,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      width: 140,
+                      height: 140,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.2),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.fastfood,
+                        size: 60,
+                        color: Colors.white,
+                      ),
+                    );
+                  },
                 ),
 
                 const SizedBox(height: 20),
 
-                // 🔥 APP NAME
+                // App Name
                 const Text(
-                  "Ubwinza Users",
+                  "Ubwinza",
                   style: TextStyle(
                     fontSize: 24,
                     color: Colors.white,
@@ -132,9 +126,9 @@ class _MySplashScreenState extends State<MySplashScreen>
 
                 const SizedBox(height: 8),
 
-                // 🔥 TAGLINE
+                // Tagline
                 const Text(
-                  "Smart • Seamless • Connected",
+                  "Food & Delivery",
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.white70,
@@ -143,7 +137,7 @@ class _MySplashScreenState extends State<MySplashScreen>
 
                 const SizedBox(height: 30),
 
-                // 🔄 LOADING INDICATOR
+                // Loading Indicator
                 const SizedBox(
                   width: 25,
                   height: 25,
