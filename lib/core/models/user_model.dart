@@ -9,6 +9,7 @@ class UserModel {
   final List<String> userCart;
   final String? phone;
   final String? address;
+  String? username;
 
   UserModel({
     required this.uid,
@@ -19,6 +20,7 @@ class UserModel {
     required this.userCart,
     this.phone,
     this.address,
+    this.username,
   });
 
   // Convert Firestore document to UserModel

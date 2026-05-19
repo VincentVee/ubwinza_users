@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:ubwinza_users/views/authScreens/phone_login.dart';
+import 'package:ubwinza_users/views/authScreens/signin_screen.dart';
 import '../../features/home/professional_home_screen.dart';
 import 'signup_screen.dart';
 
@@ -71,7 +72,7 @@ class _AuthScreenState extends State<AuthScreen> with SingleTickerProviderStateM
                       child: TabBarView(
                         controller: _tabController,
                         children: [
-                          _buildFormWrapper(const PhoneLoginScreen(), keyboardHeight),
+                          _buildFormWrapper(const SignInScreen(), keyboardHeight),
                           _buildFormWrapper(const SignupScreen(), keyboardHeight),
                         ],
                       ),

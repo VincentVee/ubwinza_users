@@ -36,6 +36,25 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
+  // =========================================================
+  // HELPER: Format Phone Number
+  // =========================================================
+
+  String _formatPhoneNumber(String phone) {
+    String cleaned = phone.trim().replaceAll(' ', '');
+    if (cleaned.startsWith('+260')) {
+      cleaned = cleaned.substring(4);
+    } else if (cleaned.startsWith('260')) {
+      cleaned = cleaned.substring(3);
+    }
+    if (cleaned.length == 9) {
+      return '+260$cleaned';
+    } else if (cleaned.length == 10 && cleaned.startsWith('0')) {
+      return '+260${cleaned.substring(1)}';
+    }
+    return '+260$cleaned';
+  }
+
   // Update User Name
   Future<void> updateUserName(String newName, BuildContext context) async {
     if (sharedPreferences == null || sharedPreferences!.getString("uid") == null) {
@@ -197,19 +216,280 @@ class AuthViewModel extends ChangeNotifier {
     }
   }
 
-  String _formatPhoneNumber(String phone) {
-    String cleaned = phone.trim().replaceAll(' ', '');
-    if (cleaned.startsWith('+260')) {
-      cleaned = cleaned.substring(4);
-    } else if (cleaned.startsWith('260')) {
-      cleaned = cleaned.substring(3);
+  // =========================================================
+  // REGISTER WITH EMAIL, USERNAME, PASSWORD AND PHONE
+  // =========================================================
+
+  Future<void> registerWithEmailPassword(
+      String email,
+      String username,
+      String password,
+      String phone,
+      BuildContext context,
+      ) async {
+    if (email.isEmpty || username.isEmpty || password.isEmpty || phone.isEmpty) {
+      commonViewModel.showSnackBar("Please fill all fields!", context);
+      return;
     }
-    if (cleaned.length == 9) {
-      return '+260$cleaned';
-    } else if (cleaned.length == 10 && cleaned.startsWith('0')) {
-      return '+260${cleaned.substring(1)}';
+
+    if (password.length < 6) {
+      commonViewModel.showSnackBar("Password must be at least 6 characters!", context);
+      return;
     }
-    return '+260$cleaned';
+
+    commonViewModel.showSnackBar("Creating your account...", context);
+
+    try {
+      final String userId = DateTime.now().millisecondsSinceEpoch.toString();
+      final String formattedPhone = _formatPhoneNumber(phone);
+      final String formattedEmail = email.trim().toLowerCase();
+      final String formattedUsername = username.trim().toLowerCase();
+
+      // Create UserModel instance
+      final userModel = UserModel(
+        uid: userId,
+        email: formattedEmail,
+        name: username.trim(),
+        imageUrl: "",
+        status: "approved",
+        userCart: ["garbageValue"],
+        phone: formattedPhone,
+        address: null,
+        username: formattedUsername,
+      );
+
+      // Store in Firestore with password (⚠️ In production, hash this password!)
+      final userData = userModel.toFirestore();
+      userData['password'] = password; // Add password field
+      userData['username'] = formattedUsername; // Ensure username is saved
+
+      await FirebaseFirestore.instance
+          .collection("users")
+          .doc(userId)
+          .set(userData);
+
+      // Save to SharedPreferences
+      await sharedPreferences!.setString("uid", userModel.uid);
+      await sharedPreferences!.setString("email", userModel.email);
+      await sharedPreferences!.setString("name", userModel.name);
+      await sharedPreferences!.setString("username", formattedUsername);
+      await sharedPreferences!.setString("imageUrl", userModel.imageUrl);
+      await sharedPreferences!.setString("status", userModel.status);
+      await sharedPreferences!.setStringList("userCart", userModel.userCart);
+      await sharedPreferences!.setString("phone", userModel.phone ?? '');
+      if (userModel.address != null) {
+        await sharedPreferences!.setString("address", userModel.address!);
+      }
+
+      _log('✅ User registered successfully: $username, $formattedEmail');
+
+      if (context.mounted) {
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const ProfessionalHomeScreen())
+        );
+        commonViewModel.showSnackBar("Account created successfully!", context);
+      }
+    } catch (e) {
+      commonViewModel.showSnackBar("Registration failed: $e", context);
+      _log('Registration error: $e', type: 'ERROR');
+    }
+  }
+
+  // =========================================================
+  // LOGIN WITH EMAIL OR USERNAME AND PASSWORD
+  // =========================================================
+
+  Future<void> validateSignInForm(
+      String emailOrUsername,
+      String password,
+      BuildContext context,
+      ) async {
+    if (emailOrUsername.isEmpty || password.isEmpty) {
+      commonViewModel.showSnackBar("Please enter email/username and password!", context);
+      return;
+    }
+
+    try {
+      QuerySnapshot query;
+
+      // Check if input is email (contains @) or username
+      if (emailOrUsername.contains('@')) {
+        // Login with email
+        _log('Attempting login with email: $emailOrUsername');
+        query = await FirebaseFirestore.instance
+            .collection('users')
+            .where('email', isEqualTo: emailOrUsername.trim().toLowerCase())
+            .get();
+      } else {
+        // Login with username
+        _log('Attempting login with username: $emailOrUsername');
+        query = await FirebaseFirestore.instance
+            .collection('users')
+            .where('username', isEqualTo: emailOrUsername.trim().toLowerCase())
+            .get();
+      }
+
+      if (query.docs.isEmpty) {
+        _log('No account found for: $emailOrUsername', type: 'WARNING');
+        commonViewModel.showSnackBar("Account not found!", context);
+        return;
+      }
+
+      final userDoc = query.docs.first;
+      final userData = userDoc.data() as Map<String, dynamic>;
+      final storedPassword = userData['password'] as String?;
+
+      // Simple password comparison (⚠️ In production, use hashed password comparison!)
+      if (storedPassword == null || storedPassword != password) {
+        _log('Incorrect password for: $emailOrUsername', type: 'WARNING');
+        commonViewModel.showSnackBar("Incorrect password!", context);
+        return;
+      }
+
+      // Create UserModel from Firestore data
+      final userModel = UserModel.fromFirestore(userDoc);
+
+      // Save user data to SharedPreferences
+      await sharedPreferences!.setString("uid", userModel.uid);
+      await sharedPreferences!.setString("email", userModel.email);
+      await sharedPreferences!.setString("name", userModel.name);
+      await sharedPreferences!.setString("username", userData['username'] ?? '');
+      await sharedPreferences!.setString("imageUrl", userModel.imageUrl);
+      await sharedPreferences!.setString("status", userModel.status);
+      await sharedPreferences!.setStringList("userCart", userModel.userCart);
+      await sharedPreferences!.setString("phone", userModel.phone ?? '');
+      if (userModel.address != null) {
+        await sharedPreferences!.setString("address", userModel.address!);
+      }
+
+      _log('✅ User logged in successfully: ${userModel.name} (${userModel.email})');
+
+      if (context.mounted) {
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const ProfessionalHomeScreen())
+        );
+        commonViewModel.showSnackBar("Login successful! Welcome back ${userModel.name}", context);
+      }
+    } catch (e) {
+      _log('Login error: $e', type: 'ERROR');
+      commonViewModel.showSnackBar("Login failed: $e", context);
+    }
+  }
+
+  // =========================================================
+  // CHECK IF EMAIL IS TAKEN
+  // =========================================================
+
+  Future<bool> isEmailTaken(String email) async {
+    try {
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('email', isEqualTo: email.trim().toLowerCase())
+          .limit(1)
+          .get();
+      return query.docs.isNotEmpty;
+    } catch (e) {
+      _log('Error checking email: $e', type: 'ERROR');
+      return false;
+    }
+  }
+
+  // =========================================================
+  // CHECK IF USERNAME IS TAKEN
+  // =========================================================
+
+  Future<bool> isUsernameTaken(String username) async {
+    try {
+      final query = await FirebaseFirestore.instance
+          .collection('users')
+          .where('username', isEqualTo: username.trim().toLowerCase())
+          .limit(1)
+          .get();
+      return query.docs.isNotEmpty;
+    } catch (e) {
+      _log('Error checking username: $e', type: 'ERROR');
+      return false;
+    }
+  }
+
+  // =========================================================
+  // UPDATE USERNAME (Optional utility method)
+  // =========================================================
+
+  Future<void> updateUsername(String newUsername, BuildContext context) async {
+    if (sharedPreferences == null || sharedPreferences!.getString("uid") == null) {
+      commonViewModel.showSnackBar("User not logged in.", context);
+      return;
+    }
+
+    final String uid = sharedPreferences!.getString("uid")!;
+    final String formattedUsername = newUsername.trim().toLowerCase();
+
+    // Check if username is taken
+    final isTaken = await isUsernameTaken(formattedUsername);
+    if (isTaken) {
+      commonViewModel.showSnackBar("Username already taken!", context);
+      return;
+    }
+
+    commonViewModel.showSnackBar("Updating username...", context);
+
+    try {
+      await FirebaseFirestore.instance
+          .collection("users")
+          .doc(uid)
+          .update({"username": formattedUsername});
+
+      await sharedPreferences!.setString("username", formattedUsername);
+
+      // Notify listeners to update UI
+      notifyListeners();
+
+      commonViewModel.showSnackBar("Username updated successfully!", context);
+      _log('Username updated to: $formattedUsername');
+    } catch (e) {
+      commonViewModel.showSnackBar("Failed to update username: $e", context);
+      _log('Error updating username: $e', type: 'ERROR');
+    }
+  }
+
+  // =========================================================
+  // GET CURRENT USER AS USERMODEL
+  // =========================================================
+
+  UserModel? getCurrentUserModel() {
+    try {
+      final String? uid = sharedPreferences?.getString("uid");
+      final String? email = sharedPreferences?.getString("email");
+      final String? name = sharedPreferences?.getString("name");
+      final String? username = sharedPreferences?.getString("username");
+      final String? imageUrl = sharedPreferences?.getString("imageUrl");
+      final String? status = sharedPreferences?.getString("status");
+      final String? phone = sharedPreferences?.getString("phone");
+      final String? address = sharedPreferences?.getString("address");
+      final List<String>? userCart = sharedPreferences?.getStringList("userCart");
+
+      if (uid == null || name == null) {
+        return null;
+      }
+
+      return UserModel(
+        uid: uid,
+        email: email ?? '',
+        name: name,
+        imageUrl: imageUrl ?? '',
+        status: status ?? 'approved',
+        userCart: userCart ?? ['garbageValue'],
+        phone: phone,
+        address: address,
+        username: username,
+      );
+    } catch (e) {
+      _log('Error getting current user: $e', type: 'ERROR');
+      return null;
+    }
   }
 
   Future<String> uploadImageToFirebase(XFile image) async {
