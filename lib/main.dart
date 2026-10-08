@@ -22,11 +22,9 @@ Future<void> main() async {
   // =======================================================
   // *** FIX: Set Status Bar Style Globally ***
   // =======================================================
-  // This ensures the status bar has dark icons (black) for light backgrounds
-  // and proper styling throughout the app
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.dark, // Black icons for light backgrounds
+    statusBarIconBrightness: Brightness.dark,
     statusBarBrightness: Brightness.light,
     systemNavigationBarColor: Colors.white,
     systemNavigationBarIconBrightness: Brightness.dark,
@@ -36,12 +34,7 @@ Future<void> main() async {
   await Firebase.initializeApp();
   sharedPreferences = await SharedPreferences.getInstance();
 
-  // WARNING: Clearing all preferences here (`await prefs.clear();`)
-  // will wipe all user settings, login tokens, etc., on every app launch.
-  // This is usually only done during development or user logout.
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.clear();
-  sharedPreferences = prefs; // Assign the cleared instance
+  // ⚠️ REMOVED: await prefs.clear();  // DO NOT CLEAR PREFERENCES ON APP START!
 
   // 3. Request location permission
   await Permission.locationWhenInUse.isDenied.then((valueOfPermission) {
@@ -51,8 +44,6 @@ Future<void> main() async {
   });
 
   // 4. Initialize AppBootstrap
-  // This must be done *before* the MultiProvider starts creating LocationViewModel,
-  // as the ViewModel relies on AppBootstrap.I.places.
   await AppBootstrap.I.init(googleApiKey: googleApiKey);
 
   runApp(
@@ -60,9 +51,6 @@ Future<void> main() async {
       providers: [
         ChangeNotifierProvider(create: (_) => CartProvider()),
         ChangeNotifierProvider(create: (_) => DeliveryProvider()),
-        // =======================================================
-        // *** FIX 1: Add LocationViewModel to the MultiProvider ***
-        // =======================================================
         ChangeNotifierProvider(create: (_) => LocationViewModel()),
         ChangeNotifierProvider(create: (_) => AuthViewModel()),
       ],

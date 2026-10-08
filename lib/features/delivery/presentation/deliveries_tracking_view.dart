@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:ubwinza_users/global/global_vars.dart';
+import '../../../global/global_instances.dart'; // Add this for sharedPreferences
 
 // Assuming 'googleApiKey' is defined in global_vars.dart
 String kGoogleApiKey = googleApiKey;
@@ -30,10 +31,60 @@ class EnhancedDeliveryTrackingView extends StatefulWidget {
 
 class _EnhancedDeliveryTrackingViewState
     extends State<EnhancedDeliveryTrackingView> {
-  final String? userId = FirebaseAuth.instance.currentUser?.uid;
+  String? userId;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _getUserId();
+  }
+
+  Future<void> _getUserId() async {
+    String? id;
+
+    // Try Firebase Auth first
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser != null) {
+      id = currentUser.uid;
+      print("✅ TrackingView: Got user from Firebase Auth: $id");
+    }
+
+    // If Firebase Auth returns null, try shared preferences
+    if (id == null) {
+      id = sharedPreferences?.getString("uid");
+      print("✅ TrackingView: Got user from SharedPreferences: $id");
+    }
+
+    // If still null, wait for Firebase Auth
+    if (id == null) {
+      await Future.delayed(const Duration(milliseconds: 500));
+      final refreshedUser = FirebaseAuth.instance.currentUser;
+      if (refreshedUser != null) {
+        id = refreshedUser.uid;
+        print("✅ TrackingView: Got user after delay: $id");
+      }
+    }
+
+    setState(() {
+      userId = id;
+      _isLoading = false;
+    });
+
+    if (id == null) {
+      print("❌ TrackingView: No user ID found anywhere");
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        backgroundColor: Colors.grey,
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     if (userId == null) {
       return const Scaffold(
         body: Center(
@@ -153,6 +204,9 @@ class _EnhancedDeliveryTrackingViewState
   }
 }
 
+// Rest of your _DeliveryMapTracker class remains exactly the same...
+// (The rest of your code from _DeliveryMapTracker onwards stays unchanged)
+
 class _DeliveryMapTracker extends StatefulWidget {
   final String requestId;
   final Map<String, dynamic> deliveryData;
@@ -200,7 +254,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
 
   String? _mainRouteDistance;
   String? _mainRouteDuration;
-  // String? _debugMessage = ''; // Unused, commented out
 
   // Loading states
   bool _isLoadingMap = true;
@@ -210,8 +263,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
   // Map type toggle
   MapType _currentMapType = MapType.normal;
 
-  // Removed _driverLocationSubscription as it is no longer needed
-  // StreamSubscription<DocumentSnapshot>? _driverLocationSubscription;
   StreamSubscription<DocumentSnapshot>? _requestUpdatesSubscription;
   StreamSubscription<QuerySnapshot>? _availableDriversSubscription;
 
@@ -222,11 +273,9 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
     _driverId = widget.deliveryData['driverId'];
     _vehicleType = widget.deliveryData['vehicleType'] ?? 'motorbike';
 
-
     _loadCustomIcons();
     _initializeMapData();
     _fetchMainRoute();
-    // Removed call to _listenToDriverLocation()
     _listenToRequestUpdates();
 
     if (!(_currentStatus == 'accepted' || _currentStatus == 'in-progress' || _currentStatus == 'heading_to_destination')) {
@@ -236,7 +285,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
 
   @override
   void dispose() {
-    // _driverLocationSubscription?.cancel(); // Cancelled as it's removed
     _requestUpdatesSubscription?.cancel();
     _availableDriversSubscription?.cancel();
     _mapController?.dispose();
@@ -248,9 +296,8 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       _defaultDriverIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue);
       _assignedDriverIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
 
-      // NOTE: Ensure 'images/bike-delivery-icon.png' and 'images/bicycle.png' are in your assets folder and registered in pubspec.yaml
       _motorbikeIcon = await _createCustomIcon('images/bike-delivery-icon.png', size: 128);
-      _bicycleIcon = await _createCustomIcon('images/bicycle.png', size: 128);
+      _bicycleIcon = await _createCustomIcon('images/bike-delivery-icon.png', size: 128);
 
     } catch (e) {
       _motorbikeIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue);
@@ -530,7 +577,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
     if (mounted) setState(() {});
   }
 
-  // Calculates the bearing (angle) between two LatLng points for marker rotation
   double _calculateBearing(LatLng start, LatLng end) {
     final startLat = start.latitude * (math.pi / 180);
     final startLng = start.longitude * (math.pi / 180);
@@ -544,15 +590,8 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
         math.sin(startLat) * math.cos(endLat) * math.cos(dLng);
 
     double bearing = math.atan2(y, x) * (180 / math.pi);
-    return (bearing + 360) % 360; // Normalize to 0-360 degrees
+    return (bearing + 360) % 360;
   }
-
-
-  // ------------------------------------------------------------------
-  // MODIFIED/NEW LOGIC: Handle driver location updates from the request document
-  // ------------------------------------------------------------------
-
-  // Removed: _listenToDriverLocation()
 
   void _updateDriverPositionFromRequest({required double lat, required double lng}) {
     if (!mounted) return;
@@ -562,7 +601,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       _updateAssignedDriverMarker();
       _updateAssignedDriverRoute();
 
-      // Center map on the driver's current location when moving
       _mapController?.animateCamera(CameraUpdate.newLatLngZoom(_driverPosition!, 15));
     });
   }
@@ -608,7 +646,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
 
     LatLng? targetPoint;
 
-    // Determine the route target based on status
     if (_currentStatus == 'accepted' || _currentStatus == 'in-progress') {
       if (pickupLat != null && pickupLng != null) {
         targetPoint = LatLng(pickupLat, pickupLng);
@@ -619,27 +656,23 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       }
     }
 
-    // CRITICAL GUARD: Ensure we have a valid target point before proceeding.
     if (targetPoint == null) {
       _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('assigned_driver_route_'));
       setState(() {});
       return;
     }
 
-    // Clear previous segmented polylines
     _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('assigned_driver_route_'));
 
-    // Fetch the route from the driver's current position to the target point
     final result = await _fetchDirections(_driverPosition!, targetPoint);
     final fullRoutePoints = result.points;
 
     if (fullRoutePoints.isNotEmpty && mounted) {
-      // Draw the entire path from the driver to the target in blue
       _polylines.add(
         Polyline(
           polylineId: const PolylineId('assigned_driver_route_future'),
           points: fullRoutePoints,
-          color: Colors.blue, // Blue for the remaining path
+          color: Colors.blue,
           width: 8,
           jointType: JointType.round,
           zIndex: 5,
@@ -650,14 +683,10 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
     setState(() {});
   }
 
-  // MODIFIED: This function now handles both status updates AND location updates
   void _listenToRequestUpdates() {
     _requestUpdatesSubscription?.cancel();
 
-    // After assignment, stop listening to nearby drivers
     _availableDriversSubscription?.cancel();
-
-    // Clear nearby driver markers/polylines
     _updateAvailableDriverMarkers();
     _polylines.removeWhere((polyline) => polyline.polylineId.value.startsWith('connection_'));
 
@@ -670,26 +699,20 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
         final data = snapshot.data()!;
         final newStatus = data['status'] as String?;
         final newDriverId = data['driverId'] as String?;
-        final driverLat = data['driverLat'] as double?; // <-- New field extraction
-        final driverLng = data['driverLog'] as double?; // <-- New field extraction
+        final driverLat = data['driverLat'] as double?;
+        final driverLng = data['driverLog'] as double?;
 
         setState(() {
           _currentStatus = newStatus;
-          // The driverId check remains useful for initial setup logic
           if (newDriverId != null && newDriverId != _driverId) {
             _driverId = newDriverId;
-            // Since we rely on the request stream now, no need to call another listener here.
-            // But we do need to stop listening to nearby drivers if a driver is assigned.
             _availableDriversSubscription?.cancel();
           }
         });
 
-        // Use the extracted driver location for updates
         if (driverLat != null && driverLng != null) {
           _updateDriverPositionFromRequest(lat: driverLat, lng: driverLng);
         } else if (_driverId != null && _driverId!.isNotEmpty) {
-          // If a driver is assigned but location is momentarily null,
-          // ensure markers/routes are cleared if delivery is completed or cancelled.
           if (_currentStatus == 'delivered' || _currentStatus == 'cancelled') {
             _driverPosition = null;
             _markers.removeWhere((marker) => marker.markerId.value == 'assigned_driver');
@@ -699,11 +722,7 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
         }
       }
     });
-
   }
-  // ------------------------------------------------------------------
-  // END OF MODIFIED/NEW LOGIC
-  // ------------------------------------------------------------------
 
   Future<_RouteResult> _fetchDirections(LatLng origin, LatLng dest) async {
     final url = Uri.parse(
@@ -810,7 +829,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       }
     }
 
-
     if (points.length < 2) return;
 
     double? minLat, maxLat, minLng, maxLng;
@@ -848,7 +866,6 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
   }
 
   String _getStatusMessage() {
-
     final count = _availableDrivers.length;
     switch (_currentStatus) {
       case 'pending':
@@ -862,13 +879,9 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
       default:
         return 'Tracking your delivery';
     }
-
   }
 
-  String statusMessage() {
-    return _getStatusMessage();
-  }
-
+  @override
   @override
   Widget build(BuildContext context) {
     final pickupLat = widget.deliveryData['pickupLat'] as double?;
@@ -934,7 +947,7 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
           ),
         ),
 
-        // Status Card
+        // Status Card - FIXED OVERFLOW
         Positioned(
           bottom: 0,
           left: 0,
@@ -964,24 +977,17 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        _getStatusTitle(),
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF1A2B7B),
+                      Expanded(
+                        child: Text(
+                          _getStatusTitle(),
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1A2B7B),
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      // if (_isLoadingRoute || _isLoadingDrivers)
-                      //   const SizedBox(
-                      //     width: 16,
-                      //     height: 16,
-                      //     child: CircularProgressIndicator(
-                      //       strokeWidth: 2,
-                      //       valueColor: AlwaysStoppedAnimation<Color>(
-                      //           Color(0xFF1A2B7B)),
-                      //     ),
-                      //   ),
                     ],
                   ),
                   const SizedBox(height: 5),
@@ -995,39 +1001,44 @@ class _DeliveryMapTrackerState extends State<_DeliveryMapTracker> {
                   ),
                   if (_mainRouteDistance != null) ...[
                     const SizedBox(height: 10),
+                    // FIXED: Wrap Row in SingleChildScrollView or use Flexible
                     Row(
                       children: [
                         const Icon(Icons.route, color: Colors.green, size: 18),
                         const SizedBox(width: 5),
-                        Text(
-                          'Trip Distance: ${_mainRouteDistance ?? 'N/A'}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black
+                        Flexible(
+                          child: Text(
+                            'Trip: ${_mainRouteDistance ?? 'N/A'}',
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        const SizedBox(width: 15),
+                        const SizedBox(width: 12),
                         const Icon(Icons.timer, color: Colors.green, size: 18),
                         const SizedBox(width: 5),
-                        Text(
-                          'Duration: ${_mainRouteDuration ?? 'N/A'}',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black
+                        Flexible(
+                          child: Text(
+                            'ETA: ${_mainRouteDuration ?? 'N/A'}',
+                            style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
                     ),
                   ],
-                  // Example of a conditional button based on status
                   if (_currentStatus == 'searching')
                     Padding(
                       padding: const EdgeInsets.only(top: 15.0),
                       child: ElevatedButton(
                         onPressed: () {
-                          // Handle cancel request logic here
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Cancelling request... (Not implemented)')),
                           );

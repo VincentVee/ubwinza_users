@@ -145,9 +145,27 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
     return uid != null && name != null && phone != null;
   }
 
-  // ================= SIDE DRAWER MENU =================
+  // Get user for display (can be guest or logged in)
+  Map<String, String?> _getUser() {
+    final String? uid = sharedPreferences?.getString("uid");
+    final String? name = sharedPreferences?.getString("name");
+    final String? phone = sharedPreferences?.getString("phone");
+    final String? email = sharedPreferences?.getString("email");
+    final String? imageUrl = sharedPreferences?.getString("imageUrl");
+
+    return {
+      'uid': uid,
+      'name': name,
+      'phone': phone,
+      'email': email,
+      'imageUrl': imageUrl,
+    };
+  }
+
+  // ================= SIDE DRAWER MENU (Always visible, limited when not logged in) =================
   Widget _buildDrawer() {
-    final user = authViewModel.getCurrentUser();
+    final user = _getUser();
+    final isLoggedIn = _isUserLoggedIn();
 
     return Container(
       width: MediaQuery.of(context).size.width * 0.75,
@@ -164,7 +182,7 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
       child: SafeArea(
         child: Column(
           children: [
-            // User Profile Header
+            // User Profile Header - Shows Guest when not logged in
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -185,10 +203,10 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
                     child: CircleAvatar(
                       radius: 40,
                       backgroundColor: Colors.white,
-                      child: user?.imageUrl != null && user!.imageUrl!.isNotEmpty
+                      child: user['imageUrl'] != null && user['imageUrl']!.isNotEmpty
                           ? ClipOval(
                         child: Image.network(
-                          user.imageUrl!,
+                          user['imageUrl']!,
                           fit: BoxFit.cover,
                           width: 80,
                           height: 80,
@@ -200,7 +218,9 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    user?.name ?? user?.email?.split('@').first ?? 'Guest User',
+                    isLoggedIn
+                        ? (user['name'] ?? user['email']?.split('@').first ?? 'User')
+                        : 'Guest User',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 18,
@@ -209,7 +229,9 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    user?.phone ?? 'No phone number',
+                    isLoggedIn
+                        ? (user['phone'] ?? 'No phone number')
+                        : 'Please login to access full features',
                     style: const TextStyle(
                       color: Colors.grey,
                       fontSize: 12,
@@ -221,74 +243,98 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
               ),
             ),
             const SizedBox(height: 24),
-            // Menu Items
-            _buildDrawerItem(
-              icon: Icons.home_outlined,
-              title: 'Home',
-              onTap: () {
-                Navigator.pop(context);
-              },
-            ),
-            _buildDrawerItem(
-              icon: Icons.shopping_bag_outlined,
-              title: 'My Orders',
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const OrdersHistoryScreen()),
-                );
-              },
-            ),
-            _buildDrawerItem(
-              icon: Icons.delivery_dining_outlined,
-              title: 'My Deliveries',
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DeliveriesListScreen()),
-                );
-              },
-            ),
-            _buildDrawerItem(
-              icon: Icons.favorite_border,
-              title: 'Favorites',
-              onTap: () {
-                Navigator.pop(context);
-                // TODO: Navigate to favorites
-              },
-            ),
-            _buildDrawerItem(
-              icon: Icons.person_outline,
-              title: 'Profile',
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                );
-              },
-            ),
-            _buildDrawerItem(
-              icon: Icons.support_agent,
-              title: 'Support',
-              onTap: () {
-                Navigator.pop(context);
-                _showSupportDialog();
-              },
-            ),
+
+            // Menu Items - Only show when logged in
+            if (isLoggedIn) ...[
+              _buildDrawerItem(
+                icon: Icons.home_outlined,
+                title: 'Home',
+                onTap: () {
+                  Navigator.pop(context);
+                },
+              ),
+              _buildDrawerItem(
+                icon: Icons.shopping_bag_outlined,
+                title: 'My Orders',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const OrdersHistoryScreen()),
+                  );
+                },
+              ),
+              _buildDrawerItem(
+                icon: Icons.delivery_dining_outlined,
+                title: 'My Deliveries',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const DeliveriesListScreen()),
+                  );
+                },
+              ),
+              _buildDrawerItem(
+                icon: Icons.favorite_border,
+                title: 'Favorites',
+                onTap: () {
+                  Navigator.pop(context);
+                  // TODO: Navigate to favorites
+                },
+              ),
+              _buildDrawerItem(
+                icon: Icons.person_outline,
+                title: 'Profile',
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                  );
+                },
+              ),
+              _buildDrawerItem(
+                icon: Icons.support_agent,
+                title: 'Support',
+                onTap: () {
+                  Navigator.pop(context);
+                  _showSupportDialog();
+                },
+              ),
+            ],
+
             const Spacer(),
+
             Divider(color: Colors.grey.withOpacity(0.2), height: 1),
-            _buildDrawerItem(
-              icon: Icons.logout,
-              title: 'Logout',
-              isLogout: true,
-              onTap: () {
-                Navigator.pop(context);
-                _showLogoutDialog();
-              },
-            ),
+
+            // Login/Register button when not logged in
+            if (!isLoggedIn)
+              _buildDrawerItem(
+                icon: Icons.login,
+                title: 'Login / Register',
+                isLogin: true,
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const AuthScreen()),
+                  );
+                },
+              ),
+
+            // Logout button - Always show (when logged in shows Logout, when not logged in shows nothing)
+            if (isLoggedIn)
+              _buildDrawerItem(
+                icon: Icons.logout,
+                title: 'Logout',
+                isLogout: true,
+                onTap: () {
+                  Navigator.pop(context);
+                  _showLogoutDialog();
+                },
+              ),
+
             const SizedBox(height: 24),
           ],
         ),
@@ -301,13 +347,25 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
     required String title,
     required VoidCallback onTap,
     bool isLogout = false,
+    bool isLogin = false,
   }) {
+    Color iconColor = Colors.white;
+    Color textColor = Colors.white;
+
+    if (isLogout) {
+      iconColor = Colors.red;
+      textColor = Colors.red;
+    } else if (isLogin) {
+      iconColor = Colors.green;
+      textColor = Colors.green;
+    }
+
     return ListTile(
-      leading: Icon(icon, color: isLogout ? Colors.red : Colors.white, size: 24),
+      leading: Icon(icon, color: iconColor, size: 24),
       title: Text(
         title,
         style: TextStyle(
-          color: isLogout ? Colors.red : Colors.white,
+          color: textColor,
           fontSize: 15,
           fontWeight: FontWeight.w500,
         ),
@@ -472,11 +530,7 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
   }
 
   void _checkAuthAndStartDelivery() {
-    final String? uid = sharedPreferences?.getString("uid");
-    final String? name = sharedPreferences?.getString("name");
-    final String? phone = sharedPreferences?.getString("phone");
-
-    if (uid != null && name != null && phone != null) {
+    if (_isUserLoggedIn()) {
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -1098,7 +1152,7 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
       key: _scaffoldKey,
       backgroundColor: const Color(0xFFF8F9FF),
       endDrawerEnableOpenDragGesture: false,
-      drawer: isLoggedIn ? _buildDrawer() : null,
+      drawer: _buildDrawer(), // Always show drawer now
       appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.transparent,
@@ -1116,14 +1170,12 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> with Si
           statusBarColor: Colors.transparent,
           statusBarIconBrightness: Brightness.dark,
         ),
-        leading: isLoggedIn
-            ? IconButton(
+        leading: IconButton(
           icon: const Icon(Icons.menu, color: Color(0xFF6C63FF), size: 24),
           onPressed: () {
             _scaffoldKey.currentState?.openDrawer();
           },
-        )
-            : null,
+        ),
         actions: [
           CartBadgeIcon(
             badgeColor: Colors.red,

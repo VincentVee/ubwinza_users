@@ -899,7 +899,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
     if (deliveryProvider.deliveryLocation == null) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
-         SnackBar(
+        SnackBar(
           content: Text('Please select a delivery location first'),
           backgroundColor: Colors.orange,
           behavior: SnackBarBehavior.floating,
@@ -912,7 +912,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
     if (!_areAllFeesCalculated(deliveryProvider, sellerIds)) {
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
-         SnackBar(
+        SnackBar(
           content: Text('Calculating delivery fees, please wait...'),
           backgroundColor: Colors.orange,
           behavior: SnackBarBehavior.floating,
@@ -925,10 +925,39 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
     setState(() => _isLoading = true);
 
     try {
-      final userId = FirebaseAuth.instance.currentUser?.uid;
-      if (userId == null) {
-        throw 'Not signed in';
+      // Get user ID from multiple sources
+      String? userId;
+
+      // Try Firebase Auth first
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        userId = currentUser.uid;
+        print("✅ User ID from Firebase Auth: $userId");
       }
+
+      // If Firebase Auth returns null, try shared preferences
+      if (userId == null) {
+        userId = await PrefsService.I.getUserId(); // You need to implement this method
+        print("✅ User ID from SharedPreferences: $userId");
+      }
+
+      // If still null, try to get from Firebase Auth again with a delay
+      if (userId == null) {
+        // Wait a moment for Firebase Auth to initialize
+        await Future.delayed(const Duration(milliseconds: 500));
+        final refreshedUser = FirebaseAuth.instance.currentUser;
+        if (refreshedUser != null) {
+          userId = refreshedUser.uid;
+          print("✅ User ID after delay: $userId");
+        }
+      }
+
+      if (userId == null) {
+        print("❌ No user ID found anywhere!");
+        throw Exception('Please sign in to place an order');
+      }
+
+      print("✅ Final User ID: $userId");
 
       final dm = PrefsService.I.getDeliveryMethod();
       final rideType = (dm == DeliveryMethod.bicycle) ? 'bicycle' : 'motorbike';
@@ -946,8 +975,9 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
       for (final sellerId in sellerIds) {
         final calc = deliveryProvider.getDeliveryCalculation(sellerId);
         if (calc == null) {
-          throw 'Missing delivery fee for seller $sellerId';
+          throw Exception('Missing delivery fee for seller $sellerId');
         }
+        print("📦 Creating order for seller: $sellerId");
         final orderId = await orderSvc.createOrder(
           userId: userId,
           sellerId: sellerId,
@@ -957,6 +987,7 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
           rideType: rideType,
         );
         createdOrderIds.add(orderId);
+        print("✅ Order created: $orderId");
       }
 
       if (!mounted) return;
@@ -1015,14 +1046,22 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
         ),
       );
     } catch (e) {
+      print("❌ Checkout error: $e");
       if (mounted) {
         ScaffoldMessenger.of(context).clearSnackBars();
+
+        String errorMessage = e.toString();
+        if (errorMessage.contains('sign in') || errorMessage.contains('Not signed in')) {
+          errorMessage = 'Please sign in to place an order';
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Checkout failed: $e'),
+            content: Text('Checkout failed: $errorMessage'),
             backgroundColor: Colors.red,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -1030,7 +1069,6 @@ class _CartScreenState extends State<CartScreen> with SingleTickerProviderStateM
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
   Future<void> _showClearCartDialog(BuildContext context, CartProvider cartProvider) async {
     await showDialog(
       context: context,

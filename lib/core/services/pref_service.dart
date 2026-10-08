@@ -7,10 +7,23 @@ class PrefsService {
   static final I = PrefsService._();
 
   static const _kDeliveryMethod = 'delivery_method';
+  static const _kUserId = 'uid';
 
   Future<void> setDeliveryMethod(DeliveryMethod m) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_kDeliveryMethod, m.key);
+  }
+
+  // Fixed getUserId method
+  Future<String?> getUserId() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kUserId);
+  }
+
+  // Set user ID after login
+  Future<void> setUserId(String userId) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kUserId, userId);
   }
 
   Future<DeliveryMethod> getDeliveryMethod() async {
